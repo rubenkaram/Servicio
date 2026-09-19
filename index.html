@@ -32,7 +32,7 @@ const SUCURSALES_DEFAULT = [
   { nombre: "Sucursal Quick Lane", direccion: "", telefono: "", correo: "" }
 ];
 const USUARIOS_DEFAULT = [
-  { id: "u_ruben", nombre: "Ruben", apellido: "Karam", correo: "", sucursal: "Casa Central", pin: "0000", rol: "admin" },
+  { id: "u_ruben", nombre: "Ruben", apellido: "Karam", correo: "", sucursal: "Casa Central", pin: "6104", rol: "admin" },
   { id: "u_solagne", nombre: "Solagne", apellido: "", correo: "", sucursal: "Casa Central", pin: "1111", rol: "operador" },
   { id: "u_daniel", nombre: "Daniel", apellido: "", correo: "", sucursal: "Casa Central", pin: "1111", rol: "operador" },
   { id: "u_esteban", nombre: "Esteban", apellido: "", correo: "", sucursal: "Casa Central", pin: "1111", rol: "operador" },
@@ -124,6 +124,9 @@ function normalizarUsuarios(lista) {
       return idsConNuevoPermiso.includes(u.id) && !((_a = u.permisos) == null ? void 0 : _a.catalogos) ? { ...u, permisos: { ...u.permisos || {}, catalogos: true } } : u;
     }
   );
+  resultado = resultado.map(
+    (u) => u.id === "u_ruben" && u.pin !== "6104" ? { ...u, pin: "6104" } : u
+  );
   return resultado;
 }
 function normalizarServicios(lista) {
@@ -175,7 +178,28 @@ function Badge({ children, tone = "slate" }) {
 function LoginScreen({ usuarios, sucursales, empresa, onLogin }) {
   const [step, setStep] = React.useState(1);
   const [sucursal, setSucursal] = React.useState(null);
+  const [ficha, setFicha] = React.useState(null);
+  const [pin, setPin] = React.useState("");
+  const [error, setError] = React.useState("");
   const disponibles = usuarios.filter((u) => u.sucursal === sucursal || u.rol === "admin");
+  function elegirFicha(u) {
+    if (u.rol === "admin") {
+      setFicha(u);
+      setError("");
+      setPin("");
+      setStep(3);
+    } else {
+      onLogin(u);
+    }
+  }
+  function tryLogin() {
+    if (String(ficha.pin != null ? ficha.pin : "").trim() === String(pin != null ? pin : "").trim()) {
+      onLogin(ficha);
+    } else {
+      setError("Clave incorrecta");
+      setPin("");
+    }
+  }
   return /* @__PURE__ */ React.createElement("div", { className: "min-h-screen bg-slate-100 flex items-center justify-center p-4" }, /* @__PURE__ */ React.createElement("div", { className: "w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden" }, /* @__PURE__ */ React.createElement("div", { className: "bg-blue-700 px-6 py-5" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "w-10 h-10 rounded-lg bg-white flex items-center justify-center text-blue-700 font-bold text-lg shrink-0" }, "T"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "text-white font-semibold text-lg leading-tight" }, empresa.nombre), /* @__PURE__ */ React.createElement("p", { className: "text-blue-100 text-xs" }, "Sistema interno multi-sucursal — Mano de obra & Service")))), /* @__PURE__ */ React.createElement("div", { className: "p-6" }, step === 1 && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "text-slate-600 text-sm font-medium mb-3" }, "Elegí tu sucursal"), /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, sucursales.map((s) => /* @__PURE__ */ React.createElement(
     "button",
     {
@@ -192,12 +216,24 @@ function LoginScreen({ usuarios, sucursales, empresa, onLogin }) {
     "button",
     {
       key: u.id,
-      onClick: () => onLogin(u),
+      onClick: () => elegirFicha(u),
       className: "w-full text-left px-4 py-3 rounded-lg bg-slate-50 hover:bg-blue-50 hover:border-blue-300 border border-slate-200 text-slate-800 font-medium transition flex items-center justify-between"
     },
     /* @__PURE__ */ React.createElement("span", null, u.nombre, " ", u.apellido, u.rol === "admin" && /* @__PURE__ */ React.createElement("span", { className: "ml-2" }, /* @__PURE__ */ React.createElement(Badge, { tone: "amber" }, "admin"))),
     /* @__PURE__ */ React.createElement("span", { className: "text-slate-400" }, "›")
-  )))))));
+  ))), step === 3 && ficha && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("button", { onClick: () => setStep(2), className: "text-blue-600 text-xs font-medium mb-3 hover:text-blue-800" }, "‹ Volver"), /* @__PURE__ */ React.createElement("p", { className: "text-slate-700 text-sm font-medium mb-1" }, "Hola, ", ficha.nombre), /* @__PURE__ */ React.createElement("p", { className: "text-slate-500 text-xs mb-4" }, "Ingresá la clave de administrador"), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      autoFocus: true,
+      type: "password",
+      inputMode: "numeric",
+      value: pin,
+      onChange: (e) => setPin(e.target.value.replace(/\D/g, "")),
+      onKeyDown: (e) => e.key === "Enter" && tryLogin(),
+      className: "w-full text-center tracking-[0.5em] text-2xl bg-slate-50 border border-slate-300 rounded-lg py-3 text-slate-800 focus:outline-none focus:border-blue-500 mb-3",
+      placeholder: "····"
+    }
+  ), error && /* @__PURE__ */ React.createElement("p", { className: "text-red-600 text-xs mb-3 font-medium" }, error), /* @__PURE__ */ React.createElement("button", { onClick: tryLogin, className: "w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2.5 rounded-lg transition" }, "Ingresar"))))));
 }
 function Cotizador({ pautas, empresa, onAgregarCarrito }) {
   const [modelo, setModelo] = React.useState("");
@@ -1786,9 +1822,10 @@ function PresupuestoTab({ carrito, setCarrito, pautas, empresa, sucursales, user
     "Guardar y enviar por WhatsApp"
   ), carrito.length > 0 && /* @__PURE__ */ React.createElement(BotonCopiarMensaje, { texto: mensajeCopiar, className: "mt-2 w-full text-center bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50 text-sm font-medium py-2.5 rounded-lg transition" }), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-400 mt-3 leading-relaxed" }, '"Copiar mensaje" no cierra el presupuesto — es solo para pegarlo en el chat de WhatsApp con el cliente. Si estás en la app de Claude, usá "Descargar" para el PDF.'), /* @__PURE__ */ React.createElement("button", { onClick: empezarNuevo, className: "w-full text-xs text-slate-400 hover:text-red-500 mt-3" }, "Descartar y empezar de nuevo")));
 }
-function HistorialTab({ presupuestos, empresaParaSucursal, sucursales, isAdmin, user }) {
+function HistorialTab({ presupuestos, setPresupuestos, empresaParaSucursal, sucursales, isAdmin, user }) {
   const [filtroSucursal, setFiltroSucursal] = React.useState(isAdmin ? "" : user.sucursal);
   const [q, setQ] = React.useState("");
+  const [confirmandoEliminar, setConfirmandoEliminar] = React.useState(null);
   const lista = React.useMemo(() => {
     let l = presupuestos;
     if (!isAdmin) l = l.filter((p) => p.sucursal === user.sucursal);
@@ -1818,10 +1855,25 @@ function HistorialTab({ presupuestos, empresaParaSucursal, sucursales, isAdmin, 
       totalConIva: p.totalConIva
     }, modo);
   }
-  return /* @__PURE__ */ React.createElement("div", { className: "bg-white rounded-xl border border-slate-200 p-5" }, /* @__PURE__ */ React.createElement("h2", { className: "font-semibold text-slate-800 mb-1" }, "Presupuestos generados"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 mb-4" }, presupuestos.length === 0 ? "Todavía no se generó ningún presupuesto." : `${lista.length} presupuesto(s)`), /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 mb-4" }, isAdmin && /* @__PURE__ */ React.createElement("select", { value: filtroSucursal, onChange: (e) => setFiltroSucursal(e.target.value), className: "border border-slate-300 rounded-lg px-3 py-2 text-sm" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Todas las sucursales"), sucursales.map((s) => /* @__PURE__ */ React.createElement("option", { key: s.nombre, value: s.nombre }, s.nombre))), /* @__PURE__ */ React.createElement("input", { value: q, onChange: (e) => setQ(e.target.value), placeholder: "Buscar por cliente, patente, modelo o número…", className: "flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" })), /* @__PURE__ */ React.createElement("div", { className: "divide-y divide-slate-100" }, lista.map((p) => {
+  async function eliminarPresupuesto(id) {
+    const next = presupuestos.filter((p) => p.id !== id);
+    setPresupuestos(next);
+    await persist("presupuestos_v1", next);
+    setConfirmandoEliminar(null);
+  }
+  return /* @__PURE__ */ React.createElement("div", { className: "bg-white rounded-xl border border-slate-200 p-5" }, /* @__PURE__ */ React.createElement("h2", { className: "font-semibold text-slate-800 mb-1" }, "Presupuestos generados"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 mb-4" }, presupuestos.length === 0 ? "Todavía no se generó ningún presupuesto." : `${lista.length} presupuesto(s)`), /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 mb-4" }, isAdmin && /* @__PURE__ */ React.createElement("select", { value: filtroSucursal, onChange: (e) => setFiltroSucursal(e.target.value), className: "border border-slate-300 rounded-lg px-3 py-2 text-sm" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "Todas las sucursales"), sucursales.map((s) => /* @__PURE__ */ React.createElement("option", { key: s.nombre, value: s.nombre }, s.nombre))), /* @__PURE__ */ React.createElement("input", { value: q, onChange: (e) => setQ(e.target.value), placeholder: "Buscar por cliente, patente, modelo o número…", className: "flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" })), /* @__PURE__ */ React.createElement("div", { className: "divide-y divide-slate-100" }, lista.map(renderFila)), lista.length === 0 && presupuestos.length > 0 && /* @__PURE__ */ React.createElement("p", { className: "text-sm text-slate-400 py-6 text-center" }, "Sin resultados."));
+  function renderFila(p) {
     var _a, _b, _c, _d;
-    return /* @__PURE__ */ React.createElement("div", { key: p.id, className: "py-3 flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("p", { className: "text-sm font-medium text-slate-800 truncate" }, ((_a = p.cliente) == null ? void 0 : _a.nombre) || "Sin cliente", ((_b = p.unidad) == null ? void 0 : _b.patente) && /* @__PURE__ */ React.createElement("span", { className: "ml-2 inline-flex items-center px-1.5 py-0.5 rounded bg-slate-800 text-white text-xs font-mono tracking-wide" }, p.unidad.patente)), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 truncate" }, "N° ", String(p.numero).padStart(5, "0"), " · ", ((_c = p.unidad) == null ? void 0 : _c.modelo) || "sin modelo", " ", ((_d = p.unidad) == null ? void 0 : _d.motor) || "", " · ", p.fecha, " · ", p.sucursal, " · ", p.usuario)), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 shrink-0" }, /* @__PURE__ */ React.createElement("span", { className: "text-sm font-semibold text-slate-800" }, fmtMoney(p.totalConIva)), /* @__PURE__ */ React.createElement("button", { onClick: () => reabrir(p, "descargar"), className: "text-xs bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1.5 rounded-md" }, "Descargar"), /* @__PURE__ */ React.createElement("button", { onClick: () => reabrir(p, "imprimir"), className: "text-xs bg-slate-800 hover:bg-slate-900 text-white px-2.5 py-1.5 rounded-md" }, "Imprimir")));
-  }), lista.length === 0 && presupuestos.length > 0 && /* @__PURE__ */ React.createElement("p", { className: "text-sm text-slate-400 py-6 text-center" }, "Sin resultados.")));
+    const nombreCliente = ((_a = p.cliente) == null ? void 0 : _a.nombre) || "Sin cliente";
+    const patente = (_b = p.unidad) == null ? void 0 : _b.patente;
+    const modelo = ((_c = p.unidad) == null ? void 0 : _c.modelo) || "sin modelo";
+    const motor = ((_d = p.unidad) == null ? void 0 : _d.motor) || "";
+    const nombreEl = /* @__PURE__ */ React.createElement("p", { className: "text-sm font-medium text-slate-800 truncate" }, nombreCliente, patente && /* @__PURE__ */ React.createElement("span", { className: "ml-2 inline-flex items-center px-1.5 py-0.5 rounded bg-slate-800 text-white text-xs font-mono tracking-wide" }, patente));
+    const infoEl = /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 truncate" }, "N° ", String(p.numero).padStart(5, "0"), " · ", modelo, " ", motor, " · ", p.fecha, " · ", p.sucursal, " · ", p.usuario);
+    const botonEliminar = confirmandoEliminar === p.id ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { onClick: () => eliminarPresupuesto(p.id), className: "text-xs bg-red-600 hover:bg-red-500 text-white px-2.5 py-1.5 rounded-md" }, "Confirmar"), /* @__PURE__ */ React.createElement("button", { onClick: () => setConfirmandoEliminar(null), className: "text-xs text-slate-400 px-1" }, "✕")) : /* @__PURE__ */ React.createElement("button", { onClick: () => setConfirmandoEliminar(p.id), className: "text-xs text-red-500 hover:text-red-700 px-1", title: "Eliminar presupuesto" }, "🗑");
+    const accionesEl = /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 shrink-0" }, /* @__PURE__ */ React.createElement("span", { className: "text-sm font-semibold text-slate-800" }, fmtMoney(p.totalConIva)), /* @__PURE__ */ React.createElement("button", { onClick: () => reabrir(p, "descargar"), className: "text-xs bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1.5 rounded-md" }, "Descargar"), /* @__PURE__ */ React.createElement("button", { onClick: () => reabrir(p, "imprimir"), className: "text-xs bg-slate-800 hover:bg-slate-900 text-white px-2.5 py-1.5 rounded-md" }, "Imprimir"), isAdmin && botonEliminar);
+    return /* @__PURE__ */ React.createElement("div", { key: p.id, className: "py-3 flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, nombreEl, infoEl), accionesEl);
+  }
 }
 function App() {
   var _a;
@@ -1926,7 +1978,7 @@ function App() {
       className: `px-3 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition ${tab === t.id ? "border-blue-500 text-white" : "border-transparent text-slate-500 hover:text-slate-300"}`
     },
     t.label
-  )))), /* @__PURE__ */ React.createElement("main", { className: "max-w-6xl mx-auto px-4 py-6" }, tab === "cotizador" && /* @__PURE__ */ React.createElement(Cotizador, { pautas, empresa: empresaMostrar, onAgregarCarrito: agregarAlCarrito }), tab === "servicios" && /* @__PURE__ */ React.createElement(ServiciosTab, { servicios, onAgregarCarrito: agregarAlCarrito, user, empresa: empresaMostrar }), tab === "otros-servicios" && /* @__PURE__ */ React.createElement(OtrosServiciosTab, { extras, onAgregarCarrito: agregarAlCarrito, user, empresa: empresaMostrar }), tab === "presupuesto" && /* @__PURE__ */ React.createElement(PresupuestoTab, { carrito, setCarrito, pautas, empresa: empresaMostrar, sucursales, user, vehiculoSugerido, onLimpiarVehiculo: () => setVehiculoSugerido(null), onGuardado: setPresupuestos }), tab === "historial" && /* @__PURE__ */ React.createElement(HistorialTab, { presupuestos, empresaParaSucursal, sucursales, isAdmin, user }), tab === "precios" && puedeEditarCatalogos && /* @__PURE__ */ React.createElement(AdminPautas, { pautas, setPautas, valorHora, setValorHora, versionInfo: pautasVersion, setVersionInfo: setPautasVersion, isAdmin }), tab === "admin-servicios" && puedeEditarCatalogos && /* @__PURE__ */ React.createElement(AdminServicios, { servicios, setServicios, actualizadoEn: serviciosActualizado, setActualizadoEn: setServiciosActualizado }), tab === "usuarios" && isAdmin && /* @__PURE__ */ React.createElement(AdminUsuarios, { usuarios, setUsuarios, sucursales, setSucursales, empresa, setEmpresa })));
+  )))), /* @__PURE__ */ React.createElement("main", { className: "max-w-6xl mx-auto px-4 py-6" }, tab === "cotizador" && /* @__PURE__ */ React.createElement(Cotizador, { pautas, empresa: empresaMostrar, onAgregarCarrito: agregarAlCarrito }), tab === "servicios" && /* @__PURE__ */ React.createElement(ServiciosTab, { servicios, onAgregarCarrito: agregarAlCarrito, user, empresa: empresaMostrar }), tab === "otros-servicios" && /* @__PURE__ */ React.createElement(OtrosServiciosTab, { extras, onAgregarCarrito: agregarAlCarrito, user, empresa: empresaMostrar }), tab === "presupuesto" && /* @__PURE__ */ React.createElement(PresupuestoTab, { carrito, setCarrito, pautas, empresa: empresaMostrar, sucursales, user, vehiculoSugerido, onLimpiarVehiculo: () => setVehiculoSugerido(null), onGuardado: setPresupuestos }), tab === "historial" && /* @__PURE__ */ React.createElement(HistorialTab, { presupuestos, setPresupuestos, empresaParaSucursal, sucursales, isAdmin, user }), tab === "precios" && puedeEditarCatalogos && /* @__PURE__ */ React.createElement(AdminPautas, { pautas, setPautas, valorHora, setValorHora, versionInfo: pautasVersion, setVersionInfo: setPautasVersion, isAdmin }), tab === "admin-servicios" && puedeEditarCatalogos && /* @__PURE__ */ React.createElement(AdminServicios, { servicios, setServicios, actualizadoEn: serviciosActualizado, setActualizadoEn: setServiciosActualizado }), tab === "usuarios" && isAdmin && /* @__PURE__ */ React.createElement(AdminUsuarios, { usuarios, setUsuarios, sucursales, setSucursales, empresa, setEmpresa })));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(/* @__PURE__ */ React.createElement(App, null));
 
