@@ -1377,6 +1377,7 @@ function primerNombre(n) {
     const f = n.split(",")[1].trim().split(/\s+/)[0];
     return f.charAt(0).toUpperCase() + f.slice(1).toLowerCase();
   }
+  if (n === n.toUpperCase() && !/\b(S\.?R\.?L|S\.?A\.?S?|S\.?A|SH|COOP|ASOC|MUNICIPALIDAD|GOBIERNO)\b\.?$/i.test(n.trim())) return n.toLowerCase().replace(/(^|\s)(\S)/g, (m, a, b) => a + b.toUpperCase());
   return n;
 }
 function mensajeLeadAccesorios(c, items, user) {
@@ -1486,6 +1487,100 @@ function clientesDesdeExcelVentas(wb) {
   }
   return out;
 }
+const MESES_CRM = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
+function zonaDeTextoSucursal(t) {
+  const n = normalizeText(normSp(String(t || "")) || "");
+  if (n.startsWith("catamarca")) return "Catamarca";
+  if (n.startsWith("la rioja")) return "La Rioja";
+  return null;
+}
+function waDeTelefonosSucios(txt, areaDef) {
+  const crudo = String(txt || "").trim();
+  if (!crudo) return { tels: [], wa: "" };
+  const mArea = crudo.match(/^0?(\d{3,4})[\s-]/);
+  const area = mArea && mArea[1].length + 0 <= 4 && /^(2|3)/.test(mArea[1]) ? mArea[1] : areaDef || "383";
+  let piezas = crudo.split(/\/|[\r\n]+|\s+-\s*|\s*-\s+/).map((x) => x.trim()).filter(Boolean);
+  piezas = piezas.flatMap((x) => x.replace(/\D/g, "").length > 13 ? x.split("-") : [x]).map((x) => x.trim()).filter(Boolean);
+  const cands = [];
+  for (const pz of piezas) {
+    let d = pz.replace(/\D/g, "");
+    let movil = false;
+    if (d.length === 13 && d.startsWith("549")) {
+      cands.push({ wa: d, movil: true });
+      continue;
+    }
+    if (d.startsWith("54") && d.length > 11) d = d.slice(2);
+    d = d.replace(/^0+/, "");
+    if (d.length === 12) {
+      for (const k of [4, 3, 2]) if (d.slice(k, k + 2) === "15") {
+        d = d.slice(0, k) + d.slice(k + 2);
+        movil = true;
+        break;
+      }
+    } else if (d.startsWith("15") && area.length + d.length - 2 === 10) {
+      d = area + d.slice(2);
+      movil = true;
+    }
+    if (d.length === 10) cands.push({ wa: "549" + d, movil });
+  }
+  const elegido = cands.find((c) => c.movil) || cands[0];
+  return { tels: piezas.filter((x) => x.replace(/\D/g, "").length >= 6), wa: elegido ? elegido.wa : "" };
+}
+function clientesDesdeSolicitudVenta(wb) {
+  const out = [];
+  for (const nombreHoja of wb.SheetNames) {
+    const ws = wb.Sheets[nombreHoja];
+    if (!ws["!ref"]) continue;
+    const range = XLSX.utils.decode_range(ws["!ref"]);
+    let hr = null;
+    const encab = (r) => {
+      const m = {};
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const v = normalizeText(normSp(String(celda(ws, r, c) || "")) || "");
+        if (v && m[v] === void 0) m[v] = c;
+      }
+      return m;
+    };
+    let H = null;
+    for (let r = range.s.r; r <= Math.min(range.s.r + 12, range.e.r) && hr === null; r++) {
+      const m = encab(r);
+      if (m["cliente"] !== void 0 && m["chasis"] !== void 0 && m["fecha entregado"] !== void 0) {
+        hr = r;
+        H = m;
+      }
+    }
+    if (hr === null) continue;
+    for (let r = hr + 1; r <= range.e.r; r++) {
+      const g = (k) => H[k] === void 0 ? void 0 : celda(ws, r, H[k]);
+      const nombre = normSp(String(g("cliente") || ""));
+      if (!nombre) continue;
+      const estado = normalizeText(String(g("estado") || ""));
+      if (estado && estado !== "entregado") continue;
+      let f = g("fecha entregado") || g("ult. estado");
+      let entrega = "";
+      if (f instanceof Date && !isNaN(f)) entrega = `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, "0")}-${String(f.getDate()).padStart(2, "0")}`;
+      else if (typeof f === "number") {
+        const d = XLSX.SSF.parse_date_code(f);
+        entrega = d ? `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}` : "";
+      } else if (f) entrega = String(f).slice(0, 10);
+      const modelo = normSp(`${g("auto") || ""} ${g("modelo") || ""}`);
+      const vin = normSp(String(g("chasis") || ""));
+      const sucTxt = normSp(String(g("sucursal") || ""));
+      const zonaFila = zonaDeTextoSucursal(sucTxt);
+      const telInfo = waDeTelefonosSucios(g("cliente tel"), zonaFila === "La Rioja" ? "380" : "383");
+      const tels = telInfo.tels;
+      const mes = entrega ? `${MESES_CRM[Number(entrega.slice(5, 7)) - 1] || ""}-${entrega.slice(0, 4)}` : "";
+      out.push({ id: "c" + hashSimple(vin || "ns:" + String(g("ns") || "") + nombre + modelo), nombre, tel: tels.join(" / "), wa: telInfo.wa, email: "", modelo, cat: categoriaModeloCliente(modelo), vin, patente: normSp(String(g("patente") || "")), entrega, mes, vendedor: String(g("vendedor") || "").trim().toUpperCase(), estado: "pendiente", eventos: [], zonaArchivo: zonaFila, sucursalArchivo: sucTxt });
+    }
+  }
+  const vistos = new Set();
+  return out.filter((c) => {
+    const k = claveCliente(c);
+    if (vistos.has(k)) return false;
+    vistos.add(k);
+    return true;
+  });
+}
 function claveCliente(c) {
   return c.vin ? `v:${c.vin}` : `n:${normalizeText(c.nombre)}|${normalizeText(c.modelo)}`;
 }
@@ -1507,6 +1602,19 @@ function estadoCamp(c, camp) {
 }
 function verTodoConcesionario(user) {
   return !!user && (user.rol === "admin" || !!(user.permisos && user.permisos.crm));
+}
+const CRM_ZONAS = ["La Rioja", "Catamarca"];
+function zonaDeSucursal(suc) {
+  return suc === "Sucursal Catamarca" ? "Catamarca" : "La Rioja";
+}
+function zonaCliente(c) {
+  return c && c.zona || "La Rioja";
+}
+function clientesVisiblesCRM(clientes, user) {
+  const l = clientes || [];
+  if (verTodoConcesionario(user)) return l;
+  const z = zonaDeSucursal(user && user.sucursal);
+  return l.filter((c) => zonaCliente(c) === z);
 }
 function prepagoIdxParaCliente(c) {
   const s = String(c.modelo || "").toUpperCase();
@@ -1581,20 +1689,25 @@ function CRMTab({ clientes, setClientes, user, verTodo, onArmarPresupuesto }) {
   const [q, setQ] = React.useState("");
   const [selId, setSelId] = React.useState(null);
   const [error, setError] = React.useState("");
+  const [filtroZona, setFiltroZona] = React.useState("");
   const h = React.createElement;
+  const base = React.useMemo(() => {
+    const l = clientesVisiblesCRM(clientes, user);
+    return verTodo && filtroZona ? l.filter((c) => zonaCliente(c) === filtroZona) : l;
+  }, [clientes, user, verTodo, filtroZona]);
   const lista = React.useMemo(() => {
-    let l = clientes;
+    let l = base;
     if (filtroEstado) l = l.filter((c) => estadoCamp(c, camp) === filtroEstado);
     if (filtroModelo) l = l.filter((c) => (c.cat || "Sin clasificar") === filtroModelo);
     if (q.trim()) {
       const s = normalizeText(q);
-      l = l.filter((c) => normalizeText(`${c.nombre} ${c.modelo} ${c.tel} ${c.vin} ${c.vendedor}`).includes(s));
+      l = l.filter((c) => normalizeText(`${c.nombre} ${c.modelo} ${c.tel} ${c.vin} ${c.vendedor} ${c.patente || ""}`).includes(s));
     }
     return [...l].sort((a, b) => String(b.entrega).localeCompare(String(a.entrega)));
-  }, [clientes, filtroEstado, filtroModelo, q, camp]);
-  const cuenta = (e) => clientes.filter((c) => estadoCamp(c, camp) === e).length;
-  const modelosClientes = [...new Set(clientes.map((c) => c.cat || "Sin clasificar"))].sort();
-  const cliente = clientes.find((c) => c.id === selId) || null;
+  }, [base, filtroEstado, filtroModelo, q, camp]);
+  const cuenta = (e) => base.filter((c) => estadoCamp(c, camp) === e).length;
+  const modelosClientes = [...new Set(base.map((c) => c.cat || "Sin clasificar"))].sort();
+  const cliente = base.find((c) => c.id === selId) || null;
   async function actualizar(id, fn) {
     setError("");
     try {
@@ -1624,17 +1737,20 @@ function CRMTab({ clientes, setClientes, user, verTodo, onArmarPresupuesto }) {
     }
   }
   const tabsVista = [{ id: "clientes", label: "Clientes y leads" }, ...verTodo ? [{ id: "reporte", label: "Reporte de campaña" }, { id: "importar", label: "Cargar unidades entregadas" }] : []];
-  return h("div", null, h("div", { className: "flex flex-wrap items-center gap-2 mb-4" }, tabsVista.map((t) => h("button", { key: t.id, onClick: () => setVista(t.id), className: `px-3 py-1.5 rounded-lg text-sm font-medium ${vista === t.id ? "bg-[#003478] text-white" : "bg-white border border-slate-200 text-slate-700"}` }, t.label)), error && h("span", { className: "text-xs text-red-600 ml-2" }, error)), vista === "reporte" && h(ReporteCampania, { clientes }), vista === "importar" && h(ImportarClientesCRM, { onAgregar: agregarClientes, total: clientes.length }), vista === "clientes" && h("div", null, h("div", { className: "flex flex-wrap items-center gap-2 mb-3" }, h("span", { className: "text-xs text-slate-500" }, "Campaña:"), Object.entries(CRM_CAMPANIAS).map(([k, v]) => h("button", { key: k, onClick: () => {
+  return h("div", null, h("div", { className: "flex flex-wrap items-center gap-2 mb-4" }, tabsVista.map((t) => h("button", { key: t.id, onClick: () => setVista(t.id), className: `px-3 py-1.5 rounded-lg text-sm font-medium ${vista === t.id ? "bg-[#003478] text-white" : "bg-white border border-slate-200 text-slate-700"}` }, t.label)), verTodo && vista !== "importar" && h("label", { className: "flex items-center gap-1.5 text-xs text-slate-500 ml-auto" }, "Sucursal:", h("select", { value: filtroZona, onChange: (e) => {
+    setFiltroZona(e.target.value);
+    setSelId(null);
+  }, className: "border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-slate-700" }, h("option", { value: "" }, "Todas (La Rioja + Catamarca)"), CRM_ZONAS.map((z) => h("option", { key: z, value: z }, z)))), !verTodo && h("span", { className: "ml-auto text-xs text-slate-500" }, "Clientes de ", zonaDeSucursal(user && user.sucursal)), error && h("span", { className: "text-xs text-red-600 ml-2" }, error)), vista === "reporte" && h(ReporteCampania, { clientes: base, porSucursal: !filtroZona, titulo: filtroZona || "Todo el concesionario" }), vista === "importar" && h(ImportarClientesCRM, { onAgregar: agregarClientes, total: clientes.length, totalesZona: CRM_ZONAS.map((z) => [z, clientes.filter((c) => zonaCliente(c) === z).length]) }), vista === "clientes" && h("div", null, h("div", { className: "flex flex-wrap items-center gap-2 mb-3" }, h("span", { className: "text-xs text-slate-500" }, "Campaña:"), Object.entries(CRM_CAMPANIAS).map(([k, v]) => h("button", { key: k, onClick: () => {
     setCamp(k);
     setFiltroEstado("");
   }, className: `px-3 py-1 rounded-full text-xs font-medium border ${camp === k ? k === "prepago" ? "bg-[#003478] text-white border-[#003478]" : "bg-violet-600 text-white border-violet-600" : "bg-white border-slate-300 text-slate-600"}` }, v.label))), h("div", { className: "grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4" }, Object.entries(CRM_ESTADOS).map(([k, v]) => h("button", { key: k, onClick: () => setFiltroEstado(filtroEstado === k ? "" : k), className: `text-left rounded-xl border p-3 ${filtroEstado === k ? "border-[#003478] ring-1 ring-[#003478]" : "border-slate-200"} bg-white` }, h("p", { className: "text-2xl font-bold text-slate-800" }, cuenta(k)), h("p", { className: "text-xs text-slate-500" }, v.label)))), h("div", { className: "grid lg:grid-cols-5 gap-6" }, h("div", { className: "lg:col-span-2 bg-white rounded-xl border border-slate-200 p-4" }, h("div", { className: "flex gap-2 mb-3" }, h("input", { value: q, onChange: (e) => setQ(e.target.value), placeholder: "Buscar cliente, modelo, VIN…", className: "flex-1 min-w-0 border border-slate-300 rounded-lg px-3 py-2 text-sm" }), h("select", { value: filtroModelo, onChange: (e) => setFiltroModelo(e.target.value), className: "border border-slate-300 rounded-lg px-2 py-2 text-sm max-w-[45%]" }, h("option", { value: "" }, "Todos los modelos"), modelosClientes.map((m) => h("option", { key: m, value: m }, m)))), h("p", { className: "text-xs text-slate-400 mb-2" }, lista.length, " clientes"), h("div", { className: "max-h-[640px] overflow-y-auto divide-y divide-slate-100 border border-slate-100 rounded-lg" }, lista.map((c) => {
     const ue = ultimoEvento(c);
     const eA = estadoCamp(c, "accesorios");
     const eP = estadoCamp(c, "prepago");
-    return h("button", { key: c.id, onClick: () => setSelId(c.id), className: `w-full text-left px-3 py-2 ${selId === c.id ? "bg-blue-50" : "hover:bg-slate-50"}` }, h("div", { className: "flex items-center gap-1.5" }, h("span", { className: "flex-1 min-w-0 text-sm font-medium text-slate-800 truncate" }, c.nombre), h("span", { title: "Accesorios", className: `text-[10px] rounded px-1.5 py-0.5 shrink-0 ${CRM_ESTADOS[eA].cls}` }, "Acc: ", CRM_ESTADOS[eA].label), h("span", { title: "Prepago", className: `text-[10px] rounded px-1.5 py-0.5 shrink-0 ${CRM_ESTADOS[eP].cls}` }, "PP: ", CRM_ESTADOS[eP].label)), h("p", { className: "text-[11px] text-slate-500 truncate" }, c.cat || "Sin clasificar", " · ", c.modelo), h("p", { className: "text-[11px] text-slate-400" }, "Entrega ", fmtFecha(c.entrega), ue ? ` · últ. acción ${fmtFecha(ue.f)}` : ""));
-  }))), h("div", { className: "lg:col-span-3" }, !cliente ? h("div", { className: "bg-white rounded-xl border border-slate-200 p-10 text-center text-sm text-slate-400" }, "Elegí un cliente para preparar y enviar el lead.") : h(DetalleClienteCRM, { key: cliente.id + camp, cliente, user, campInicial: camp, onActualizar: (fn) => actualizar(cliente.id, fn), onArmarPresupuesto })))));
+    return h("button", { key: c.id, onClick: () => setSelId(c.id), className: `w-full text-left px-3 py-2 ${selId === c.id ? "bg-blue-50" : "hover:bg-slate-50"}` }, h("div", { className: "flex items-center gap-1.5" }, h("span", { className: "flex-1 min-w-0 text-sm font-medium text-slate-800 truncate" }, c.nombre), h("span", { title: "Accesorios", className: `text-[10px] rounded px-1.5 py-0.5 shrink-0 ${CRM_ESTADOS[eA].cls}` }, "Acc: ", CRM_ESTADOS[eA].label), h("span", { title: "Prepago", className: `text-[10px] rounded px-1.5 py-0.5 shrink-0 ${CRM_ESTADOS[eP].cls}` }, "PP: ", CRM_ESTADOS[eP].label)), h("p", { className: "text-[11px] text-slate-500 truncate" }, c.cat || "Sin clasificar", " · ", c.modelo), h("p", { className: "text-[11px] text-slate-400" }, verTodo && !filtroZona ? h("span", { className: `mr-1 rounded px-1 ${zonaCliente(c) === "Catamarca" ? "bg-sky-100 text-sky-700" : "bg-orange-100 text-orange-700"}` }, zonaCliente(c)) : null, "Entrega ", fmtFecha(c.entrega), ue ? ` · últ. acción ${fmtFecha(ue.f)}` : ""));
+  }))), h("div", { className: "lg:col-span-3" }, !cliente ? h("div", { className: "bg-white rounded-xl border border-slate-200 p-10 text-center text-sm text-slate-400" }, "Elegí un cliente para preparar y enviar el lead.") : h(DetalleClienteCRM, { key: cliente.id + camp, cliente, user, verTodo, campInicial: camp, onActualizar: (fn) => actualizar(cliente.id, fn), onArmarPresupuesto })))));
 }
-function DetalleClienteCRM({ cliente, user, campInicial, onActualizar, onArmarPresupuesto }) {
+function DetalleClienteCRM({ cliente, user, verTodo, campInicial, onActualizar, onArmarPresupuesto }) {
   const c = cliente;
   const h = React.createElement;
   const [camp, setCamp] = React.useState(campInicial || "accesorios");
@@ -1751,7 +1867,10 @@ function DetalleClienteCRM({ cliente, user, campInicial, onActualizar, onArmarPr
     setPpPlanes(new Set(planesSugeridosPrepago(i)));
     setTexto(null);
   }, className: "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-2" }, h("option", { value: -1 }, "Elegí el modelo…"), PREPAGOS_DATA.map((d, i) => h("option", { key: i, value: i }, `${d.modelo} · ${d.motor}`))), ppModelo && h("div", { className: "border border-slate-200 rounded-lg max-h-48 overflow-y-auto divide-y divide-slate-100" }, ppModelo.planes.map((p) => h("label", { key: p.plan, className: "flex items-center gap-2 px-2 py-1.5 text-xs cursor-pointer hover:bg-slate-50" }, h("input", { type: "checkbox", checked: ppPlanes.has(p.plan), onChange: () => togglePlan(p.plan) }), h("span", { className: "flex-1" }, h("b", null, etiquetaPlanPrepago(p)), " · ", kmPrepago(p)), h("span", { className: "font-semibold" }, fmtMoney(p.precio))))), h("p", { className: "text-[11px] text-slate-400 mt-1" }, "Para unidades 0 km corresponden los planes Basic (antes del 1er service)."))), h("img", { src: PP_IMG.beneficios, alt: "Beneficios Ford Protect", className: "w-full rounded-lg border border-slate-100 mb-4" }));
-  return h("div", { className: "bg-white rounded-xl border-2 p-5", style: { borderColor: colorCamp } }, h("div", { className: "flex items-start justify-between gap-3 mb-3" }, h("div", null, h("p", { className: "font-semibold text-slate-800" }, c.nombre), h("p", { className: "text-xs text-slate-500" }, c.modelo), h("p", { className: "text-xs text-slate-400" }, "Entrega ", fmtFecha(c.entrega), c.vin ? ` · VIN ${c.vin}` : "", c.vendedor ? ` · Vendedor ${c.vendedor}` : "", c.email ? ` · ${c.email}` : "")), h("span", { className: `text-xs rounded px-2 py-1 shrink-0 ${CRM_ESTADOS[estadoActual].cls}` }, CRM_ESTADOS[estadoActual].label)), h("div", { className: "flex gap-2 mb-4" }, Object.entries(CRM_CAMPANIAS).map(([k, v]) => h("button", { key: k, onClick: () => cambiarCamp(k), className: `flex-1 text-sm font-medium py-2 rounded-lg border ${camp === k ? k === "prepago" ? "bg-[#003478] text-white border-[#003478]" : "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-300"}` }, k === "prepago" ? "🛡 " : "🧩 ", "Ofrecer ", v.label))), h("div", { className: "mb-3" }, h("label", { className: "text-xs text-slate-500 block mb-1" }, "WhatsApp (", c.tel || "sin teléfono", ")"), h("input", { value: tel, onChange: (e) => setTel(e.target.value), placeholder: "Ej: 3804123456", className: `w-full sm:w-1/2 border rounded-lg px-3 py-2 text-sm ${numero ? "border-slate-300" : "border-red-300 bg-red-50"}` })), esPP ? panelPP : panelAcc, h("label", { className: "text-xs font-medium text-slate-500 block mb-1" }, "Mensaje (podés editarlo)"), h("textarea", { value: mensaje, onChange: (e) => setTexto(e.target.value), rows: 10, className: "w-full border border-slate-300 rounded-lg px-3 py-2 text-xs mb-3 font-sans" }), h("div", { className: "grid sm:grid-cols-3 gap-2 mb-2" }, h("a", { href: numero && listo ? `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}` : void 0, target: "_blank", rel: "noreferrer", onClick: enviarWhatsApp, className: `text-center text-sm font-medium py-2.5 rounded-lg ${numero && listo ? "bg-emerald-600 hover:bg-emerald-500 text-white" : "bg-slate-200 text-slate-400 cursor-not-allowed"}` }, guardando ? "Registrando…" : "Enviar lead por WhatsApp"), h("button", { onClick: compartirConImagenes, disabled: !listo, className: "text-sm font-medium py-2.5 rounded-lg bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50" }, esPP ? "Compartir con banner (celular)" : "Compartir con imágenes (celular)"), h("button", { onClick: armarPresupuesto, disabled: !listo, className: "text-sm font-medium py-2.5 rounded-lg bg-white border border-blue-300 text-blue-700 hover:bg-blue-50 disabled:opacity-50" }, "Armar presupuesto")), esPP && h("a", { href: PP_IMG.banner, download: "ford-protect-prepago.jpg", className: "text-xs text-blue-600 underline" }, "Descargar banner"), !numero && h("p", { className: "text-xs text-red-600 mb-2" }, "Cargá un número de WhatsApp válido (código de área + número, sin 0 ni 15)."), h("div", { className: "border-t border-slate-100 pt-3 mt-3" }, h("p", { className: "text-xs font-medium text-slate-500 mb-2" }, "Resultado del lead — ", CRM_CAMPANIAS[camp].label), h("div", { className: "flex flex-wrap gap-2" }, h("button", { onClick: () => registrar("respuesta", {}, "interesado"), disabled: guardando, className: "text-xs px-3 py-1.5 rounded-lg bg-amber-100 text-amber-800 hover:bg-amber-200" }, "Respondió / interesado"), h("button", { onClick: abrirVenta, disabled: guardando, className: "text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500" }, "✓ Venta concretada"), h("button", { onClick: () => registrar("descarte", {}, "descartado"), disabled: guardando, className: "text-xs px-3 py-1.5 rounded-lg bg-rose-100 text-rose-700 hover:bg-rose-200" }, "No interesado"), estadoActual !== "pendiente" && h("button", { onClick: () => registrar("reabrir", {}, "pendiente"), disabled: guardando, className: "text-xs px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200" }, "Volver a pendiente")), venta && h("div", { className: "mt-3 border border-emerald-200 bg-emerald-50 rounded-lg p-3" }, h("p", { className: "text-sm font-medium text-emerald-800 mb-2" }, "Registrar venta — ", CRM_CAMPANIAS[camp].label), esPP ? h("select", { value: venta.plan, onChange: (e) => {
+  return h("div", { className: "bg-white rounded-xl border-2 p-5", style: { borderColor: colorCamp } }, h("div", { className: "flex items-start justify-between gap-3 mb-3" }, h("div", null, h("p", { className: "font-semibold text-slate-800" }, c.nombre), h("p", { className: "text-xs text-slate-500" }, c.modelo), h("p", { className: "text-xs text-slate-400" }, "Entrega ", fmtFecha(c.entrega), c.vin ? ` · VIN ${c.vin}` : "", c.vendedor ? ` · Vendedor ${c.vendedor}` : "", c.email ? ` · ${c.email}` : ""), verTodo && h("label", { className: "text-xs text-slate-500 mt-1 flex items-center gap-1.5" }, "Entregado en:", h("select", { value: zonaCliente(c), onChange: (e) => {
+    const z = e.target.value;
+    if (z !== zonaCliente(c) && confirm(`¿Pasar a ${c.nombre} a ${z}? Lo van a ver los usuarios de esa sucursal.`)) onActualizar((x) => ({ ...x, zona: z }));
+  }, className: "border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-700" }, CRM_ZONAS.map((z) => h("option", { key: z, value: z }, z))))), h("span", { className: `text-xs rounded px-2 py-1 shrink-0 ${CRM_ESTADOS[estadoActual].cls}` }, CRM_ESTADOS[estadoActual].label)), h("div", { className: "flex gap-2 mb-4" }, Object.entries(CRM_CAMPANIAS).map(([k, v]) => h("button", { key: k, onClick: () => cambiarCamp(k), className: `flex-1 text-sm font-medium py-2 rounded-lg border ${camp === k ? k === "prepago" ? "bg-[#003478] text-white border-[#003478]" : "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-300"}` }, k === "prepago" ? "🛡 " : "🧩 ", "Ofrecer ", v.label))), h("div", { className: "mb-3" }, h("label", { className: "text-xs text-slate-500 block mb-1" }, "WhatsApp (", c.tel || "sin teléfono", ")"), h("input", { value: tel, onChange: (e) => setTel(e.target.value), placeholder: "Ej: 3804123456", className: `w-full sm:w-1/2 border rounded-lg px-3 py-2 text-sm ${numero ? "border-slate-300" : "border-red-300 bg-red-50"}` })), esPP ? panelPP : panelAcc, h("label", { className: "text-xs font-medium text-slate-500 block mb-1" }, "Mensaje (podés editarlo)"), h("textarea", { value: mensaje, onChange: (e) => setTexto(e.target.value), rows: 10, className: "w-full border border-slate-300 rounded-lg px-3 py-2 text-xs mb-3 font-sans" }), h("div", { className: "grid sm:grid-cols-3 gap-2 mb-2" }, h("a", { href: numero && listo ? `https://wa.me/${numero}?text=${encodeURIComponent(mensaje)}` : void 0, target: "_blank", rel: "noreferrer", onClick: enviarWhatsApp, className: `text-center text-sm font-medium py-2.5 rounded-lg ${numero && listo ? "bg-emerald-600 hover:bg-emerald-500 text-white" : "bg-slate-200 text-slate-400 cursor-not-allowed"}` }, guardando ? "Registrando…" : "Enviar lead por WhatsApp"), h("button", { onClick: compartirConImagenes, disabled: !listo, className: "text-sm font-medium py-2.5 rounded-lg bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50" }, esPP ? "Compartir con banner (celular)" : "Compartir con imágenes (celular)"), h("button", { onClick: armarPresupuesto, disabled: !listo, className: "text-sm font-medium py-2.5 rounded-lg bg-white border border-blue-300 text-blue-700 hover:bg-blue-50 disabled:opacity-50" }, "Armar presupuesto")), esPP && h("a", { href: PP_IMG.banner, download: "ford-protect-prepago.jpg", className: "text-xs text-blue-600 underline" }, "Descargar banner"), !numero && h("p", { className: "text-xs text-red-600 mb-2" }, "Cargá un número de WhatsApp válido (código de área + número, sin 0 ni 15)."), h("div", { className: "border-t border-slate-100 pt-3 mt-3" }, h("p", { className: "text-xs font-medium text-slate-500 mb-2" }, "Resultado del lead — ", CRM_CAMPANIAS[camp].label), h("div", { className: "flex flex-wrap gap-2" }, h("button", { onClick: () => registrar("respuesta", {}, "interesado"), disabled: guardando, className: "text-xs px-3 py-1.5 rounded-lg bg-amber-100 text-amber-800 hover:bg-amber-200" }, "Respondió / interesado"), h("button", { onClick: abrirVenta, disabled: guardando, className: "text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500" }, "✓ Venta concretada"), h("button", { onClick: () => registrar("descarte", {}, "descartado"), disabled: guardando, className: "text-xs px-3 py-1.5 rounded-lg bg-rose-100 text-rose-700 hover:bg-rose-200" }, "No interesado"), estadoActual !== "pendiente" && h("button", { onClick: () => registrar("reabrir", {}, "pendiente"), disabled: guardando, className: "text-xs px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200" }, "Volver a pendiente")), venta && h("div", { className: "mt-3 border border-emerald-200 bg-emerald-50 rounded-lg p-3" }, h("p", { className: "text-sm font-medium text-emerald-800 mb-2" }, "Registrar venta — ", CRM_CAMPANIAS[camp].label), esPP ? h("select", { value: venta.plan, onChange: (e) => {
     const pl = ppModelo && ppModelo.planes.find((p) => p.plan === e.target.value);
     setVenta({ ...venta, plan: e.target.value, monto: String(pl ? pl.precio : venta.monto) });
   }, className: "w-full border border-slate-300 rounded px-2 py-1 text-sm mb-2" }, (ppModelo ? ppModelo.planes : []).map((p) => h("option", { key: p.plan, value: p.plan }, `${etiquetaPlanPrepago(p)} · ${kmPrepago(p)} · ${fmtMoney(p.precio)}`))) : h("div", { className: "max-h-40 overflow-y-auto mb-2 bg-white rounded border border-emerald-100" }, catalogoVenta.map((a) => h("label", { key: a.pn, className: "flex items-center gap-2 px-2 py-1 text-xs" }, h("input", { type: "checkbox", checked: venta.pns.has(a.pn), onChange: () => {
@@ -1766,31 +1885,55 @@ function DetalleClienteCRM({ cliente, user, campInicial, onActualizar, onArmarPr
     setNota("");
   }, className: "text-sm bg-slate-800 text-white px-3 py-1.5 rounded-lg" }, "Guardar"))), h("div", { className: "border-t border-slate-100 pt-3 mt-3" }, h("p", { className: "text-xs font-medium text-slate-500 mb-2" }, "Historial del cliente"), (c.eventos || []).length === 0 ? h("p", { className: "text-xs text-slate-400" }, "Sin acciones registradas.") : h("ul", { className: "space-y-1" }, [...c.eventos].reverse().map((e, i) => h("li", { key: i, className: "text-xs text-slate-600" }, h("span", { className: `inline-block rounded px-1.5 mr-1 text-[10px] text-white ${campDe(e) === "prepago" ? "bg-[#003478]" : "bg-violet-600"}` }, campDe(e) === "prepago" ? "Prepago" : "Accesorios"), h("b", null, fmtFecha(e.f)), " · ", { envio: "Lead enviado", respuesta: "Respondió / interesado", venta: "Venta concretada", descarte: "No interesado", reabrir: "Vuelto a pendiente", nota: "Nota" }[e.t] || e.t, e.monto ? ` · ${fmtMoney(e.monto)}` : "", e.items ? campDe(e) === "prepago" ? ` · ${e.items.join(", ")}` : ` · ${e.items.length} accesorios` : "", e.nota ? ` · “${e.nota}”` : "", e.u ? ` — ${e.u}` : "", e.suc ? ` (${e.suc})` : "")))));
 }
-function ImportarClientesCRM({ onAgregar, total }) {
+function ImportarClientesCRM({ onAgregar, total, totalesZona }) {
   const [prev, setPrev] = React.useState(null);
+  const [formato, setFormato] = React.useState("");
+  const [zona, setZona] = React.useState("");
+  const [inclOtras, setInclOtras] = React.useState(false);
   const [msg, setMsg] = React.useState("");
   const h = React.createElement;
   async function onFile(e) {
     const f = e.target.files[0];
     if (!f) return;
     setMsg("");
+    setZona("");
+    setInclOtras(false);
     try {
       const wb = XLSX.read(await f.arrayBuffer(), { type: "array", cellDates: true });
-      const cl = clientesDesdeExcelVentas(wb);
+      let cl = clientesDesdeSolicitudVenta(wb);
+      let fmt = "solicitud";
+      if (!cl.length) {
+        cl = clientesDesdeExcelVentas(wb);
+        fmt = "ventas";
+      }
+      setFormato(fmt);
       setPrev(cl);
-      if (!cl.length) setMsg('No encontré clientes. El Excel debe tener la columna "Apellido y Nombre".');
+      if (!cl.length) setMsg('No encontré clientes. El archivo debe ser el Excel de ventas 0 km (columna "Apellido y Nombre") o la Solicitud de venta (columnas "Cliente", "Chasis", "Fecha entregado").');
     } catch (err) {
       setMsg("No se pudo leer el archivo.");
+    } finally {
+      e.target.value = "";
     }
   }
+  const esSolicitud = formato === "solicitud";
+  const otras = esSolicitud && prev ? prev.filter((c) => !c.zonaArchivo) : [];
+  const porZona = esSolicitud && prev ? CRM_ZONAS.map((z) => [z, prev.filter((c) => c.zonaArchivo === z).length]) : [];
+  const puedeConfirmar = prev && prev.length > 0 && (esSolicitud || zona);
   async function confirmar() {
-    const n = await onAgregar(prev);
-    if (n >= 0) setMsg(`✓ Se agregaron ${n} clientes nuevos (los que ya estaban no se duplican).`);
+    if (!puedeConfirmar) return;
+    let lista;
+    if (esSolicitud) {
+      lista = prev.filter((c) => c.zonaArchivo || inclOtras).map(({ zonaArchivo, ...c }) => ({ ...c, zona: zonaArchivo || "Catamarca" }));
+    } else {
+      lista = prev.map((c) => ({ ...c, zona }));
+    }
+    const n = await onAgregar(lista);
+    if (n >= 0) setMsg(`✓ Se agregaron ${n} clientes nuevos${esSolicitud ? "" : ` a ${zona}`} (los que ya estaban no se duplican).`);
     setPrev(null);
   }
-  return h("div", { className: "bg-white rounded-xl border border-slate-200 p-5 max-w-2xl" }, h("p", { className: "font-semibold text-slate-800 mb-1" }, "Cargar clientes desde el Excel de ventas 0 km"), h("p", { className: "text-xs text-slate-500 mb-3" }, "Usá el mismo Excel de \"Ventas 0 km – contacto posterior\" (una hoja por mes). Se agregan solo los clientes nuevos (se compara por chasis/VIN); los que ya están mantienen su historial. Hoy hay ", total, " clientes cargados."), h("input", { type: "file", accept: ".xlsx,.xls", onChange: onFile, className: "text-xs mb-2" }), prev && prev.length > 0 && h("div", { className: "mt-2" }, h("p", { className: "text-sm text-slate-700 mb-2" }, "Se leyeron ", h("b", null, prev.length), " clientes del archivo."), h("button", { onClick: confirmar, className: "bg-blue-600 text-white text-sm px-3 py-1.5 rounded-lg" }, "Agregar los nuevos")), msg && h("p", { className: "text-sm mt-2 text-slate-700" }, msg));
+  return h("div", { className: "bg-white rounded-xl border border-slate-200 p-5 max-w-2xl" }, h("p", { className: "font-semibold text-slate-800 mb-1" }, "Cargar unidades entregadas"), h("p", { className: "text-xs text-slate-500 mb-3" }, "Acepta dos formatos: el Excel de \"Ventas 0 km – contacto posterior\" (La Rioja, una hoja por mes) y la \"Solicitud de venta\" (.xls) de Catamarca. Se agregan solo los clientes nuevos (se compara por chasis/VIN); los que ya están mantienen su historial. Hoy hay ", total, " clientes cargados", totalesZona ? ` (${totalesZona.map(([z, n]) => `${z}: ${n}`).join(" · ")})` : "", "."), h("input", { type: "file", accept: ".xlsx,.xls", onChange: onFile, className: "text-xs mb-2" }), prev && prev.length > 0 && h("div", { className: "mt-2" }, h("p", { className: "text-sm text-slate-700 mb-2" }, "Se leyeron ", h("b", null, prev.length), " unidades entregadas", esSolicitud ? " (formato Solicitud de venta)." : "."), esSolicitud ? h("div", { className: "text-sm text-slate-700 mb-3 space-y-1" }, h("p", { className: "text-xs text-slate-500" }, "La sucursal se toma de la columna \"Sucursal\" de cada unidad:"), porZona.map(([z, n]) => h("p", { key: z }, "• ", z, ": ", h("b", null, n))), otras.length > 0 && h("div", { className: "mt-2 rounded-lg bg-amber-50 border border-amber-200 p-2" }, h("p", { className: "text-xs text-amber-800" }, h("b", null, otras.length), " son reventas a otras provincias (", [...new Set(otras.map((c) => c.sucursalArchivo))].join(", "), "). No se cargan salvo que lo marques:"), h("label", { className: "flex items-center gap-2 text-xs text-amber-900 mt-1" }, h("input", { type: "checkbox", checked: inclOtras, onChange: (e) => setInclOtras(e.target.checked) }), "Cargarlas igual como clientes de Catamarca"))) : h("div", { className: "flex flex-wrap items-center gap-2 mb-3" }, h("span", { className: "text-sm text-slate-700" }, "¿Dónde se entregaron estas unidades?"), CRM_ZONAS.map((z) => h("button", { key: z, onClick: () => setZona(z), className: `px-3 py-1 rounded-full text-sm border ${zona === z ? "bg-[#003478] text-white border-[#003478]" : "bg-white border-slate-300 text-slate-700"}` }, z))), h("button", { onClick: confirmar, disabled: !puedeConfirmar, className: `text-white text-sm px-3 py-1.5 rounded-lg ${puedeConfirmar ? "bg-blue-600" : "bg-slate-300 cursor-not-allowed"}` }, esSolicitud ? "Agregar los nuevos" : zona ? `Agregar los nuevos a ${zona}` : "Elegí la sucursal primero")), msg && h("p", { className: "text-sm mt-2 text-slate-700" }, msg));
 }
-function ReporteCampania({ clientes }) {
+function ReporteCampania({ clientes, porSucursal, titulo }) {
   const h = React.createElement;
   const [desde, setDesde] = React.useState("");
   const [hasta, setHasta] = React.useState("");
@@ -1823,6 +1966,7 @@ function ReporteCampania({ clientes }) {
     return Object.values(m).sort((a, b) => b.clientes - a.clientes);
   }
   const porModelo = agrupar((c) => c.cat || "Sin clasificar", clientes);
+  const porZona = agrupar((c) => zonaCliente(c), clientes);
   const porMes = agrupar((c) => c.mes, clientes).sort((a, b) => String(a.k).localeCompare(String(b.k)));
   const porVendedor = agrupar((c) => c.vendedor, clientes);
   const porUsuario = {};
@@ -1862,14 +2006,15 @@ function ReporteCampania({ clientes }) {
     const filas = clientes.map((c) => {
       const env = (c.eventos || []).filter((e) => e.t === "envio");
       const vta = (c.eventos || []).filter((e) => e.t === "venta");
-      return { Cliente: c.nombre, Telefono: c.tel, Modelo: c.modelo, "Modelo catálogo": c.cat, VIN: c.vin, Entrega: c.entrega, Vendedor: c.vendedor, "Estado accesorios": CRM_ESTADOS[estadoCamp(c, "accesorios")].label, "Estado prepago": CRM_ESTADOS[estadoCamp(c, "prepago")].label, "Leads enviados": env.length, "Último envío": env.length ? fmtFecha(env[env.length - 1].f) : "", "Enviado por": env.length ? env[env.length - 1].u : "", "Accesorios ofrecidos": env.length ? (env[env.length - 1].items || []).map(nombreAcc).join(" | ") : "", "Monto vendido": vta.reduce((t, v) => t + (v.monto || 0), 0), "Accesorios vendidos": vta.flatMap((v) => (v.items || []).map(nombreAcc)).join(" | "), "Fecha venta": vta.length ? fmtFecha(vta[vta.length - 1].f) : "" };
+      return { Sucursal: zonaCliente(c), Cliente: c.nombre, Telefono: c.tel, Modelo: c.modelo, "Modelo catálogo": c.cat, VIN: c.vin, Entrega: c.entrega, Vendedor: c.vendedor, "Estado accesorios": CRM_ESTADOS[estadoCamp(c, "accesorios")].label, "Estado prepago": CRM_ESTADOS[estadoCamp(c, "prepago")].label, "Leads enviados": env.length, "Último envío": env.length ? fmtFecha(env[env.length - 1].f) : "", "Enviado por": env.length ? env[env.length - 1].u : "", "Accesorios ofrecidos": env.length ? (env[env.length - 1].items || []).map(nombreAcc).join(" | ") : "", "Monto vendido": vta.reduce((t, v) => t + (v.monto || 0), 0), "Accesorios vendidos": vta.flatMap((v) => (v.items || []).map(nombreAcc)).join(" | "), "Fecha venta": vta.length ? fmtFecha(vta[vta.length - 1].f) : "" };
     });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), "CRM Accesorios");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(porZona.map((f) => ({ Sucursal: f.k, Clientes: f.clientes, Enviados: f.enviados, Interesados: f.interesados, Ventas: f.ventas, Monto: f.monto }))), "Por sucursal");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(porModelo.map((f) => ({ Modelo: f.k, Clientes: f.clientes, Enviados: f.enviados, Ventas: f.ventas, Monto: f.monto }))), "Por modelo");
-    XLSX.writeFile(wb, `crm_accesorios_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(wb, `crm_${normalizeText(titulo || "todo").replace(/[^a-z0-9]+/g, "_")}_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.xlsx`);
   }
-  return h("div", { className: "space-y-4" }, h("div", { className: "flex flex-wrap items-end gap-3" }, h("div", null, h("label", { className: "text-xs text-slate-500 block" }, "Campaña"), h("select", { value: camp, onChange: (e) => setCamp(e.target.value), className: "border border-slate-300 rounded-lg px-2 py-1.5 text-sm" }, h("option", { value: "accesorios" }, "Accesorios"), h("option", { value: "prepago" }, "Prepago Ford Protect"), h("option", { value: "todas" }, "Ambas campañas"))), h("div", null, h("label", { className: "text-xs text-slate-500 block" }, "Desde"), h("input", { type: "date", value: desde, onChange: (e) => setDesde(e.target.value), className: "border border-slate-300 rounded-lg px-2 py-1.5 text-sm" })), h("div", null, h("label", { className: "text-xs text-slate-500 block" }, "Hasta"), h("input", { type: "date", value: hasta, onChange: (e) => setHasta(e.target.value), className: "border border-slate-300 rounded-lg px-2 py-1.5 text-sm" })), h("button", { onClick: exportar, className: "ml-auto text-sm bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg" }, "Exportar a Excel")), h("div", { className: "grid grid-cols-2 lg:grid-cols-6 gap-3" }, kpi("Clientes en campaña", total), kpi("Leads enviados", enviados.size, `${pct(enviados.size, total)} de los clientes`), kpi("Interesados", interesados.size, `${pct(interesados.size, enviados.size)} de los enviados`), kpi("Ventas concretadas", vendidos.size, `Conversión ${pct(vendidos.size, enviados.size)}`), kpi("Monto vendido", fmtMoney(monto), vendidos.size ? `Ticket prom. ${fmtMoney(Math.round(monto / ventas.length))}` : ""), kpi("Días envío → venta", promDias !== null ? promDias : "-", "promedio")), h("div", { className: "grid lg:grid-cols-2 gap-4" }, h("div", { className: "bg-white rounded-xl border border-slate-200 p-4" }, h("p", { className: "font-semibold text-slate-800 text-sm mb-3" }, "Embudo de la campaña"), funnel.map(([l, v], i) => h("div", { key: l, className: "mb-2" }, h("div", { className: "flex justify-between text-xs text-slate-600 mb-0.5" }, h("span", null, l), h("span", null, h("b", null, v), i > 0 ? ` · ${pct(v, funnel[i - 1][1])}` : "")), h("div", { className: "h-3 bg-slate-100 rounded" }, h("div", { className: "h-3 rounded bg-[#003478]", style: { width: `${total ? Math.max(2, v / total * 100) : 0}%`, opacity: 1 - i * 0.18 } }))))), h("div", { className: "bg-white rounded-xl border border-slate-200 p-4" }, h("p", { className: "font-semibold text-slate-800 text-sm mb-3" }, "Actividad por semana (últimas 12)"), semArr.length === 0 ? h("p", { className: "text-xs text-slate-400" }, "Todavía no hay envíos registrados.") : h("div", { className: "flex items-end gap-1.5 h-36" }, semArr.map(([k, v]) => h("div", { key: k, className: "flex-1 flex flex-col items-center justify-end h-full", title: `Semana del ${fmtFecha(k)}: ${v.envios} envíos, ${v.ventas} ventas` }, h("span", { className: "text-[10px] text-slate-500" }, v.envios), h("div", { className: "w-full bg-blue-500 rounded-t", style: { height: `${v.envios / maxSem * 100}%` } }), h("div", { className: "w-full bg-emerald-500", style: { height: `${v.ventas / maxSem * 100}%` } }), h("span", { className: "text-[9px] text-slate-400 mt-0.5" }, k.slice(5))))), h("p", { className: "text-[10px] text-slate-400 mt-2" }, h("span", { className: "inline-block w-2 h-2 bg-blue-500 mr-1" }), "Envíos ", h("span", { className: "inline-block w-2 h-2 bg-emerald-500 ml-3 mr-1" }), "Ventas"))), tabla("Por modelo", porModelo, colsGrupo), h("div", { className: "grid lg:grid-cols-2 gap-4" }, tabla("Por usuario que envió", Object.values(porUsuario).sort((a, b) => b.envios - a.envios), [["Usuario", (f) => f.k], ["Envíos", (f) => f.envios, 1], ["Ventas", (f) => f.ventas, 1], ["Monto", (f) => fmtMoney(f.monto), 1]]), tabla("Por vendedor de la unidad", porVendedor, colsGrupo.slice(0, 6))), tabla("Por mes de entrega", porMes, colsGrupo), h("div", { className: "grid lg:grid-cols-2 gap-4" }, tabla(camp === "prepago" ? "Planes más ofrecidos" : "Más ofrecidos", top(accOfrecidos), [["Accesorio", (f) => nombreAcc(f[0])], ["Veces", (f) => f[1], 1]]), tabla(camp === "prepago" ? "Planes más vendidos" : "Más vendidos", top(accVendidos), [["Accesorio", (f) => nombreAcc(f[0])], ["Ventas", (f) => f[1], 1]])));
+  return h("div", { className: "space-y-4" }, titulo && h("p", { className: "text-sm font-semibold text-[#003478]" }, "Informe: ", titulo), h("div", { className: "flex flex-wrap items-end gap-3" }, h("div", null, h("label", { className: "text-xs text-slate-500 block" }, "Campaña"), h("select", { value: camp, onChange: (e) => setCamp(e.target.value), className: "border border-slate-300 rounded-lg px-2 py-1.5 text-sm" }, h("option", { value: "accesorios" }, "Accesorios"), h("option", { value: "prepago" }, "Prepago Ford Protect"), h("option", { value: "todas" }, "Ambas campañas"))), h("div", null, h("label", { className: "text-xs text-slate-500 block" }, "Desde"), h("input", { type: "date", value: desde, onChange: (e) => setDesde(e.target.value), className: "border border-slate-300 rounded-lg px-2 py-1.5 text-sm" })), h("div", null, h("label", { className: "text-xs text-slate-500 block" }, "Hasta"), h("input", { type: "date", value: hasta, onChange: (e) => setHasta(e.target.value), className: "border border-slate-300 rounded-lg px-2 py-1.5 text-sm" })), h("button", { onClick: exportar, className: "ml-auto text-sm bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg" }, "Exportar a Excel")), h("div", { className: "grid grid-cols-2 lg:grid-cols-6 gap-3" }, kpi("Clientes en campaña", total), kpi("Leads enviados", enviados.size, `${pct(enviados.size, total)} de los clientes`), kpi("Interesados", interesados.size, `${pct(interesados.size, enviados.size)} de los enviados`), kpi("Ventas concretadas", vendidos.size, `Conversión ${pct(vendidos.size, enviados.size)}`), kpi("Monto vendido", fmtMoney(monto), vendidos.size ? `Ticket prom. ${fmtMoney(Math.round(monto / ventas.length))}` : ""), kpi("Días envío → venta", promDias !== null ? promDias : "-", "promedio")), h("div", { className: "grid lg:grid-cols-2 gap-4" }, h("div", { className: "bg-white rounded-xl border border-slate-200 p-4" }, h("p", { className: "font-semibold text-slate-800 text-sm mb-3" }, "Embudo de la campaña"), funnel.map(([l, v], i) => h("div", { key: l, className: "mb-2" }, h("div", { className: "flex justify-between text-xs text-slate-600 mb-0.5" }, h("span", null, l), h("span", null, h("b", null, v), i > 0 ? ` · ${pct(v, funnel[i - 1][1])}` : "")), h("div", { className: "h-3 bg-slate-100 rounded" }, h("div", { className: "h-3 rounded bg-[#003478]", style: { width: `${total ? Math.max(2, v / total * 100) : 0}%`, opacity: 1 - i * 0.18 } }))))), h("div", { className: "bg-white rounded-xl border border-slate-200 p-4" }, h("p", { className: "font-semibold text-slate-800 text-sm mb-3" }, "Actividad por semana (últimas 12)"), semArr.length === 0 ? h("p", { className: "text-xs text-slate-400" }, "Todavía no hay envíos registrados.") : h("div", { className: "flex items-end gap-1.5 h-36" }, semArr.map(([k, v]) => h("div", { key: k, className: "flex-1 flex flex-col items-center justify-end h-full", title: `Semana del ${fmtFecha(k)}: ${v.envios} envíos, ${v.ventas} ventas` }, h("span", { className: "text-[10px] text-slate-500" }, v.envios), h("div", { className: "w-full bg-blue-500 rounded-t", style: { height: `${v.envios / maxSem * 100}%` } }), h("div", { className: "w-full bg-emerald-500", style: { height: `${v.ventas / maxSem * 100}%` } }), h("span", { className: "text-[9px] text-slate-400 mt-0.5" }, k.slice(5))))), h("p", { className: "text-[10px] text-slate-400 mt-2" }, h("span", { className: "inline-block w-2 h-2 bg-blue-500 mr-1" }), "Envíos ", h("span", { className: "inline-block w-2 h-2 bg-emerald-500 ml-3 mr-1" }), "Ventas"))), porSucursal && tabla("Por sucursal (dónde se entregó la unidad)", porZona, colsGrupo), tabla("Por modelo", porModelo, colsGrupo), h("div", { className: "grid lg:grid-cols-2 gap-4" }, tabla("Por usuario que envió", Object.values(porUsuario).sort((a, b) => b.envios - a.envios), [["Usuario", (f) => f.k], ["Envíos", (f) => f.envios, 1], ["Ventas", (f) => f.ventas, 1], ["Monto", (f) => fmtMoney(f.monto), 1]]), tabla("Por vendedor de la unidad", porVendedor, colsGrupo.slice(0, 6))), tabla("Por mes de entrega", porMes, colsGrupo), h("div", { className: "grid lg:grid-cols-2 gap-4" }, tabla(camp === "prepago" ? "Planes más ofrecidos" : "Más ofrecidos", top(accOfrecidos), [["Accesorio", (f) => nombreAcc(f[0])], ["Veces", (f) => f[1], 1]]), tabla(camp === "prepago" ? "Planes más vendidos" : "Más vendidos", top(accVendidos), [["Accesorio", (f) => nombreAcc(f[0])], ["Ventas", (f) => f[1], 1]])));
 }
 function AdminPautas({ pautas, setPautas, valorHora, setValorHora, versionInfo, setVersionInfo, isAdmin, user }) {
   const [modelo, setModelo] = React.useState("");
@@ -3561,7 +3706,7 @@ function App() {
     agregarAlCarrito(lineas, vehiculo);
     setPrefillPresupuesto({ cliente, origen });
     setTab("presupuesto");
-  } }), tab === "combos-multimarca" && puedeVerQuickLane(user) && /* @__PURE__ */ React.createElement(CombosMultimarcaTab, { combos: combosMM, onAgregarCarrito: agregarAlCarrito, user, empresa: empresaMostrar }), tab === "presupuesto" && /* @__PURE__ */ React.createElement(PresupuestoTab, { carrito, setCarrito, pautas, empresa: empresaMostrar, sucursales, user, vehiculoSugerido, onLimpiarVehiculo: () => setVehiculoSugerido(null), onGuardado: setPresupuestos, edicionActual, onConsumirEdicion: () => setEdicionActual(null), crmClientes, prefill: prefillPresupuesto, onConsumirPrefill: () => setPrefillPresupuesto(null) }), tab === "historial" && /* @__PURE__ */ React.createElement(HistorialTab, { presupuestos, setPresupuestos, empresaParaSucursal, sucursales, isAdmin: isAdmin || verTodoConcesionario(user), user, onEditar: cargarParaEditar, crmClientes }), tab === "precios" && puedeEditarCatalogos && /* @__PURE__ */ React.createElement(AdminPautas, { pautas, setPautas, valorHora, setValorHora, versionInfo: pautasVersion, setVersionInfo: setPautasVersion, isAdmin, user }), tab === "admin-servicios" && puedeEditarCatalogos && /* @__PURE__ */ React.createElement(AdminServicios, { servicios, setServicios, actualizadoEn: serviciosActualizado, setActualizadoEn: setServiciosActualizado, extras, setExtras, setCombosMM }), tab === "usuarios" && isAdmin && /* @__PURE__ */ React.createElement(AdminUsuarios, { usuarios, setUsuarios, sucursales, setSucursales, empresa, setEmpresa })));
+  } }), tab === "combos-multimarca" && puedeVerQuickLane(user) && /* @__PURE__ */ React.createElement(CombosMultimarcaTab, { combos: combosMM, onAgregarCarrito: agregarAlCarrito, user, empresa: empresaMostrar }), tab === "presupuesto" && /* @__PURE__ */ React.createElement(PresupuestoTab, { carrito, setCarrito, pautas, empresa: empresaMostrar, sucursales, user, vehiculoSugerido, onLimpiarVehiculo: () => setVehiculoSugerido(null), onGuardado: setPresupuestos, edicionActual, onConsumirEdicion: () => setEdicionActual(null), crmClientes: clientesVisiblesCRM(crmClientes, user), prefill: prefillPresupuesto, onConsumirPrefill: () => setPrefillPresupuesto(null) }), tab === "historial" && /* @__PURE__ */ React.createElement(HistorialTab, { presupuestos, setPresupuestos, empresaParaSucursal, sucursales, isAdmin: isAdmin || verTodoConcesionario(user), user, onEditar: cargarParaEditar, crmClientes }), tab === "precios" && puedeEditarCatalogos && /* @__PURE__ */ React.createElement(AdminPautas, { pautas, setPautas, valorHora, setValorHora, versionInfo: pautasVersion, setVersionInfo: setPautasVersion, isAdmin, user }), tab === "admin-servicios" && puedeEditarCatalogos && /* @__PURE__ */ React.createElement(AdminServicios, { servicios, setServicios, actualizadoEn: serviciosActualizado, setActualizadoEn: setServiciosActualizado, extras, setExtras, setCombosMM }), tab === "usuarios" && isAdmin && /* @__PURE__ */ React.createElement(AdminUsuarios, { usuarios, setUsuarios, sucursales, setSucursales, empresa, setEmpresa })));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(/* @__PURE__ */ React.createElement(App, null));
 
