@@ -1736,11 +1736,11 @@ function CRMTab({ clientes, setClientes, user, verTodo, onArmarPresupuesto }) {
       return -1;
     }
   }
-  const tabsVista = [{ id: "clientes", label: "Clientes y leads" }, ...verTodo ? [{ id: "reporte", label: "Reporte de campaña" }, { id: "importar", label: "Cargar unidades entregadas" }] : []];
+  const tabsVista = [{ id: "clientes", label: "Clientes y leads" }, ...verTodo ? [{ id: "reporte", label: "Reporte de campaña" }, { id: "importar", label: "Cargar clientes" }] : []];
   return h("div", null, h("div", { className: "flex flex-wrap items-center gap-2 mb-4" }, tabsVista.map((t) => h("button", { key: t.id, onClick: () => setVista(t.id), className: `px-3 py-1.5 rounded-lg text-sm font-medium ${vista === t.id ? "bg-[#003478] text-white" : "bg-white border border-slate-200 text-slate-700"}` }, t.label)), verTodo && vista !== "importar" && h("label", { className: "flex items-center gap-1.5 text-xs text-slate-500 ml-auto" }, "Sucursal:", h("select", { value: filtroZona, onChange: (e) => {
     setFiltroZona(e.target.value);
     setSelId(null);
-  }, className: "border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-slate-700" }, h("option", { value: "" }, "Todas (La Rioja + Catamarca)"), CRM_ZONAS.map((z) => h("option", { key: z, value: z }, z)))), !verTodo && h("span", { className: "ml-auto text-xs text-slate-500" }, "Clientes de ", zonaDeSucursal(user && user.sucursal)), error && h("span", { className: "text-xs text-red-600 ml-2" }, error)), vista === "reporte" && h(ReporteCampania, { clientes: base, porSucursal: !filtroZona, titulo: filtroZona || "Todo el concesionario" }), vista === "importar" && h(ImportarClientesCRM, { onAgregar: agregarClientes, total: clientes.length, totalesZona: CRM_ZONAS.map((z) => [z, clientes.filter((c) => zonaCliente(c) === z).length]) }), vista === "clientes" && h("div", null, h("div", { className: "flex flex-wrap items-center gap-2 mb-3" }, h("span", { className: "text-xs text-slate-500" }, "Campaña:"), Object.entries(CRM_CAMPANIAS).map(([k, v]) => h("button", { key: k, onClick: () => {
+  }, className: "border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-slate-700" }, h("option", { value: "" }, "Todas (La Rioja + Catamarca)"), CRM_ZONAS.map((z) => h("option", { key: z, value: z }, z)))), !verTodo && h("span", { className: "ml-auto text-xs text-slate-500" }, "Clientes de ", zonaDeSucursal(user && user.sucursal)), error && h("span", { className: "text-xs text-red-600 ml-2" }, error)), vista === "reporte" && h(ReporteCampania, { clientes: base, porSucursal: !filtroZona, titulo: filtroZona || "Todo el concesionario" }), vista === "importar" && h(AltaClienteCRM, { onAgregar: agregarClientes }), vista === "importar" && h(ImportarClientesCRM, { onAgregar: agregarClientes, total: clientes.length, totalesZona: CRM_ZONAS.map((z) => [z, clientes.filter((c) => zonaCliente(c) === z).length]) }), vista === "clientes" && h("div", null, h("div", { className: "flex flex-wrap items-center gap-2 mb-3" }, h("span", { className: "text-xs text-slate-500" }, "Campaña:"), Object.entries(CRM_CAMPANIAS).map(([k, v]) => h("button", { key: k, onClick: () => {
     setCamp(k);
     setFiltroEstado("");
   }, className: `px-3 py-1 rounded-full text-xs font-medium border ${camp === k ? k === "prepago" ? "bg-[#003478] text-white border-[#003478]" : "bg-violet-600 text-white border-violet-600" : "bg-white border-slate-300 text-slate-600"}` }, v.label))), h("div", { className: "grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4" }, Object.entries(CRM_ESTADOS).map(([k, v]) => h("button", { key: k, onClick: () => setFiltroEstado(filtroEstado === k ? "" : k), className: `text-left rounded-xl border p-3 ${filtroEstado === k ? "border-[#003478] ring-1 ring-[#003478]" : "border-slate-200"} bg-white` }, h("p", { className: "text-2xl font-bold text-slate-800" }, cuenta(k)), h("p", { className: "text-xs text-slate-500" }, v.label)))), h("div", { className: "grid lg:grid-cols-5 gap-6" }, h("div", { className: "lg:col-span-2 bg-white rounded-xl border border-slate-200 p-4" }, h("div", { className: "flex gap-2 mb-3" }, h("input", { value: q, onChange: (e) => setQ(e.target.value), placeholder: "Buscar cliente, modelo, VIN…", className: "flex-1 min-w-0 border border-slate-300 rounded-lg px-3 py-2 text-sm" }), h("select", { value: filtroModelo, onChange: (e) => setFiltroModelo(e.target.value), className: "border border-slate-300 rounded-lg px-2 py-2 text-sm max-w-[45%]" }, h("option", { value: "" }, "Todos los modelos"), modelosClientes.map((m) => h("option", { key: m, value: m }, m)))), h("p", { className: "text-xs text-slate-400 mb-2" }, lista.length, " clientes"), h("div", { className: "max-h-[640px] overflow-y-auto divide-y divide-slate-100 border border-slate-100 rounded-lg" }, lista.map((c) => {
@@ -1884,6 +1884,45 @@ function DetalleClienteCRM({ cliente, user, verTodo, campInicial, onActualizar, 
     await registrar("nota", { nota: nota.trim() });
     setNota("");
   }, className: "text-sm bg-slate-800 text-white px-3 py-1.5 rounded-lg" }, "Guardar"))), h("div", { className: "border-t border-slate-100 pt-3 mt-3" }, h("p", { className: "text-xs font-medium text-slate-500 mb-2" }, "Historial del cliente"), (c.eventos || []).length === 0 ? h("p", { className: "text-xs text-slate-400" }, "Sin acciones registradas.") : h("ul", { className: "space-y-1" }, [...c.eventos].reverse().map((e, i) => h("li", { key: i, className: "text-xs text-slate-600" }, h("span", { className: `inline-block rounded px-1.5 mr-1 text-[10px] text-white ${campDe(e) === "prepago" ? "bg-[#003478]" : "bg-violet-600"}` }, campDe(e) === "prepago" ? "Prepago" : "Accesorios"), h("b", null, fmtFecha(e.f)), " · ", { envio: "Lead enviado", respuesta: "Respondió / interesado", venta: "Venta concretada", descarte: "No interesado", reabrir: "Vuelto a pendiente", nota: "Nota" }[e.t] || e.t, e.monto ? ` · ${fmtMoney(e.monto)}` : "", e.items ? campDe(e) === "prepago" ? ` · ${e.items.join(", ")}` : ` · ${e.items.length} accesorios` : "", e.nota ? ` · “${e.nota}”` : "", e.u ? ` — ${e.u}` : "", e.suc ? ` (${e.suc})` : "")))));
+}
+function AltaClienteCRM({ onAgregar }) {
+  const h = React.createElement;
+  const hoy = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const vacio = { nombre: "", tel: "", email: "", cat: "", version: "", vin: "", patente: "", entrega: hoy, vendedor: "", zona: "" };
+  const [f, setF] = React.useState(vacio);
+  const [abierto, setAbierto] = React.useState(false);
+  const [msg, setMsg] = React.useState("");
+  const [guardando, setGuardando] = React.useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const modelosAlta = ACC_MODELOS_ORDEN.filter((m) => m !== "Multi Vehículo" && m !== "Ranger (Flotas)");
+  const wa = waNumero(f.tel);
+  const faltan = [!normSp(f.nombre) && "nombre", !f.cat && "modelo", !f.zona && "sucursal"].filter(Boolean);
+  async function guardar() {
+    if (faltan.length || guardando) return;
+    setGuardando(true);
+    setMsg("");
+    const nombre = normSp(f.nombre);
+    const vin = normSp(f.vin).toUpperCase();
+    const modelo = normSp(`${f.cat} ${f.version}`.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+    const mes = f.entrega ? `${MESES_CRM[Number(f.entrega.slice(5, 7)) - 1] || ""}-${f.entrega.slice(0, 4)}` : "";
+    const nuevo = { id: "c" + hashSimple(vin || nombre + modelo + Date.now()), nombre, tel: normSp(f.tel), wa, email: normSp(f.email), modelo, cat: f.cat, vin, patente: normSp(f.patente).toUpperCase(), entrega: f.entrega, mes, vendedor: normSp(f.vendedor).toUpperCase(), estado: "pendiente", eventos: [], zona: f.zona, cargaManual: true };
+    const n = await onAgregar([nuevo]);
+    setGuardando(false);
+    if (n === 1) {
+      setMsg(`✓ ${nombre} agregado a ${f.zona}.`);
+      setF({ ...vacio, zona: f.zona });
+    } else if (n === 0) setMsg(vin ? "Ya existe un cliente con ese chasis/VIN." : "Ya existe un cliente con ese nombre y modelo.");
+  }
+  const inp = (k, ph, extra = {}) => h("input", { value: f[k], onChange: set(k), placeholder: ph, className: "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm", ...extra });
+  const lbl = (t, el, req) => h("div", null, h("label", { className: "text-xs text-slate-500 block mb-1" }, t, req && h("span", { className: "text-red-500" }, " *")), el);
+  if (!abierto) return h("div", { className: "max-w-2xl mb-4" }, h("button", { onClick: () => {
+    setAbierto(true);
+    setMsg("");
+  }, className: "bg-[#003478] text-white text-sm font-medium px-4 py-2 rounded-lg" }, "+ Cargar cliente a mano"), msg && h("span", { className: "text-sm text-emerald-700 ml-3" }, msg));
+  return h("div", { className: "bg-white rounded-xl border border-slate-200 p-5 max-w-2xl mb-4" }, h("div", { className: "flex items-center justify-between mb-3" }, h("p", { className: "font-semibold text-slate-800" }, "Cargar cliente a mano"), h("button", { onClick: () => setAbierto(false), className: "text-slate-400 hover:text-slate-600 text-sm" }, "✕")), h("div", { className: "grid sm:grid-cols-2 gap-3" }, h("div", { className: "sm:col-span-2" }, lbl("Apellido y nombre", inp("nombre", "Ej: PEREZ, Juan Carlos"), true)), lbl("Sucursal de entrega", h("div", { className: "flex gap-2" }, CRM_ZONAS.map((z) => h("button", { key: z, type: "button", onClick: () => setF({ ...f, zona: z }), className: `flex-1 px-3 py-2 rounded-lg text-sm border ${f.zona === z ? "bg-[#003478] text-white border-[#003478]" : "bg-white border-slate-300 text-slate-700"}` }, z))), true), lbl("Fecha de entrega", inp("entrega", "", { type: "date" })), lbl("Modelo", h("select", { value: f.cat, onChange: set("cat"), className: "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" }, h("option", { value: "" }, "Elegí el modelo…"), modelosAlta.map((m) => h("option", { key: m, value: m }, m))), true), lbl("Versión", inp("version", "Ej: TITANIUM 1.8 AT / TREND HÍBRIDA")), lbl("Teléfono / WhatsApp", h("div", null, inp("tel", "Ej: 3834123456"), f.tel && h("p", { className: `text-[11px] mt-0.5 ${wa ? "text-emerald-600" : "text-red-500"}` }, wa ? `WhatsApp: +${wa}` : "Número no válido para WhatsApp (poné característica + número, sin 0 ni 15)"))), lbl("Email", inp("email", "opcional", { type: "email" })), lbl("Chasis / VIN", inp("vin", "opcional — evita duplicados")), lbl("Patente", inp("patente", "opcional")), lbl("Vendedor", inp("vendedor", "opcional"))), h("div", { className: "flex items-center gap-3 mt-4" }, h("button", { onClick: guardar, disabled: !!faltan.length || guardando, className: `text-white text-sm font-medium px-4 py-2 rounded-lg ${faltan.length || guardando ? "bg-slate-300 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-500"}` }, guardando ? "Guardando…" : "Guardar cliente"), faltan.length > 0 && h("span", { className: "text-xs text-slate-400" }, "Falta: ", faltan.join(", ")), msg && h("span", { className: `text-sm ${msg.startsWith("✓") ? "text-emerald-700" : "text-red-600"}` }, msg)));
 }
 function ImportarClientesCRM({ onAgregar, total, totalesZona }) {
   const [prev, setPrev] = React.useState(null);
