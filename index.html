@@ -316,9 +316,6 @@ function normalizarUsuarios(lista, eliminados) {
     (u) => u.id === "u_ruben" && u.pin !== "6104" ? { ...u, pin: "6104" } : u
   );
   resultado = resultado.map(
-    (u) => u.id === "u_roxana" && !Array.isArray(u.tabs) ? { ...u, tabs: ["garantia-ext", "accesorios", "crm", "presupuesto", "historial"] } : u
-  );
-  resultado = resultado.map(
     (u) => u.id === "u_jorge" && !(u.permisos && u.permisos.crm) ? { ...u, permisos: { ...u.permisos || {}, catalogos: true, crm: true } } : u
   );
   return resultado;
@@ -2999,12 +2996,63 @@ function AdminPautas({ pautas, setPautas, valorHora, setValorHora, versionInfo, 
     if (confirm(`¿Eliminar "${r.t}" (${r.m} ${r.mo})?`)) eliminarTarea(r.idx);
   }, title: "Eliminar tarea", className: "text-red-400 hover:text-red-600 text-sm px-1" }, "🗑")))))), filas.length === 150 && /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400 mt-2" }, "Mostrando los primeros 150 resultados — refiná la búsqueda para ver más."))));
 }
+const TABS_SISTEMA = [
+  { id: "cotizador", label: "Cotizador MO" },
+  { id: "servicios", label: "Service" },
+  { id: "otros-servicios", label: "Otros Servicios" },
+  { id: "prepagos", label: "Prepagos Ford Protect" },
+  { id: "garantia-ext", label: "Garantía Extendida" },
+  { id: "accesorios", label: "Accesorios" },
+  { id: "crm", label: "CRM" },
+  { id: "combos-multimarca", label: "Combos Multimarca" },
+  { id: "presupuesto", label: "Presupuesto" },
+  { id: "historial", label: "Historial" },
+  { id: "stock", label: "Stock repuestos" },
+  { id: "precios", label: "Precios MO" },
+  { id: "admin-servicios", label: "Catálogo Service" }
+];
+const TABS_VENDEDOR = ["accesorios", "prepagos", "garantia-ext", "presupuesto", "historial"];
+function tabsPorDefecto(u) {
+  if (!u) return [];
+  if (u.rol === "admin") return TABS_SISTEMA.map((t) => t.id);
+  if (u.rol === "vendedor") return TABS_VENDEDOR;
+  return TABS_SISTEMA.map((t) => t.id).filter((id) => id !== "combos-multimarca" || puedeVerQuickLane(u));
+}
+function tabsDeUsuario(u) {
+  if (!u) return [];
+  if (u.rol === "admin") return TABS_SISTEMA.map((t) => t.id);
+  return Array.isArray(u.tabs) ? u.tabs : tabsPorDefecto(u);
+}
+function AccesosUsuario({ u, onGuardar }) {
+  const h = React.createElement;
+  const actuales = tabsDeUsuario(u);
+  const personalizado = Array.isArray(u.tabs);
+  const crmTodo = !!(u.permisos && u.permisos.crm);
+  function toggle(id) {
+    const n = actuales.includes(id) ? actuales.filter((x) => x !== id) : [...actuales, id];
+    onGuardar({ ...u, tabs: TABS_SISTEMA.map((t) => t.id).filter((x) => n.includes(x)) });
+  }
+  return h("div", { className: "w-full mt-2 rounded-lg border border-slate-200 bg-slate-50 p-3" }, h("p", { className: "text-xs font-medium text-slate-600 mb-2" }, "Pestañas que ve ", u.nombre, " ", personalizado ? h("span", { className: "text-[10px] text-blue-600" }, "(personalizado)") : h("span", { className: "text-[10px] text-slate-400" }, "(según rol ", u.rol, ")")), h("div", { className: "grid grid-cols-2 sm:grid-cols-3 gap-1.5" }, TABS_SISTEMA.map((t) => {
+    const on = actuales.includes(t.id);
+    return h("label", { key: t.id, className: `flex items-center gap-2 px-2 py-1.5 rounded-md text-xs cursor-pointer border ${on ? "bg-white border-blue-300 text-slate-800" : "bg-slate-100 border-transparent text-slate-400"}` }, h("input", { type: "checkbox", checked: on, onChange: () => toggle(t.id) }), t.label);
+  })), h("div", { className: "flex flex-wrap items-center gap-3 mt-3 pt-2 border-t border-slate-200" }, h("label", { className: "flex items-center gap-2 text-xs text-slate-700 cursor-pointer" }, h("input", { type: "checkbox", checked: crmTodo, onChange: () => onGuardar({ ...u, permisos: { ...u.permisos || {}, crm: !crmTodo } }) }), "CRM: ver clientes de todas las sucursales (y Combos Pick Up)"), h("button", { onClick: () => onGuardar({ ...u, tabs: TABS_SISTEMA.map((t) => t.id) }), className: "text-xs text-blue-600" }, "Tildar todas"), h("button", { onClick: () => onGuardar({ ...u, tabs: [] }), className: "text-xs text-blue-600" }, "Quitar todas"), personalizado && h("button", { onClick: () => {
+    const { tabs, ...resto } = u;
+    onGuardar(resto);
+  }, className: "text-xs text-slate-500 underline" }, "Volver a lo del rol")), actuales.length === 0 && h("p", { className: "text-[11px] text-red-600 mt-2" }, "Sin pestañas tildadas este usuario no puede trabajar en el sistema."));
+}
 function AdminUsuarios({ usuarios, setUsuarios, sucursales, setSucursales, empresa, setEmpresa }) {
   const [form, setForm] = React.useState({ nombre: "", apellido: "", correo: "", sucursal: sucursales[0] ? sucursales[0].nombre : "", pin: "", rol: "operador", permisoCatalogos: false });
   const [nuevaSucursal, setNuevaSucursal] = React.useState("");
   const [nombreEmpresa, setNombreEmpresa] = React.useState(empresa.nombre);
   const [pinDrafts, setPinDrafts] = React.useState({});
   const [pinGuardado, setPinGuardado] = React.useState(null);
+  const [accesosAbierto, setAccesosAbierto] = React.useState(null);
+  async function guardarUsuario(nuevo) {
+    const next = usuarios.map((u) => u.id === nuevo.id ? nuevo : u);
+    setUsuarios(next);
+    const ok = await persist("usuarios_v1", next);
+    if (!ok) alert("No se pudo guardar. Probá de nuevo.");
+  }
   async function agregar() {
     if (!form.nombre) return;
     const { permisoCatalogos, ...datos } = form;
@@ -3115,7 +3163,7 @@ function AdminUsuarios({ usuarios, setUsuarios, sucursales, setSucursales, empre
         className: `text-xs px-2.5 py-1.5 rounded-md font-medium ${((_b = u.permisos) == null ? void 0 : _b.catalogos) ? "bg-blue-100 text-blue-700 hover:bg-blue-200" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`
       },
       ((_c = u.permisos) == null ? void 0 : _c.catalogos) ? "Quitar acceso a catálogos" : "Dar acceso a catálogos"
-    ), /* @__PURE__ */ React.createElement("button", { onClick: () => eliminar(u.id), className: "text-xs text-red-500 hover:text-red-700" }, "Eliminar")));
+    ), u.rol !== "admin" && React.createElement("button", { onClick: () => setAccesosAbierto(accesosAbierto === u.id ? null : u.id), className: `text-xs px-2.5 py-1.5 rounded-md font-medium ${accesosAbierto === u.id ? "bg-[#003478] text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}` }, "Accesos (", tabsDeUsuario(u).length, "/", TABS_SISTEMA.length, ")"), /* @__PURE__ */ React.createElement("button", { onClick: () => eliminar(u.id), className: "text-xs text-red-500 hover:text-red-700" }, "Eliminar")), accesosAbierto === u.id && React.createElement(AccesosUsuario, { u, onGuardar: guardarUsuario }));
   })), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-400 mt-3" }, "Si a alguien no le entra el PIN, confirmá acá el número exacto que tiene cargado — a veces se confunde con otro colaborador.")), /* @__PURE__ */ React.createElement("div", { className: "bg-white rounded-xl border border-slate-200 p-5 h-fit" }, /* @__PURE__ */ React.createElement("h2", { className: "font-semibold text-slate-800 mb-4" }, "Sucursales"), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 mb-4" }, /* @__PURE__ */ React.createElement("input", { value: nuevaSucursal, onChange: (e) => setNuevaSucursal(e.target.value), placeholder: "Nombre de sucursal", className: "flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" }), /* @__PURE__ */ React.createElement("button", { onClick: agregarSucursal, className: "bg-slate-800 text-white text-sm px-3 rounded-lg" }, "+")), /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, sucursales.map((s) => /* @__PURE__ */ React.createElement("div", { key: s.nombre, className: "bg-slate-50 rounded-lg px-3 py-2.5 border border-slate-200" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between mb-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "text-sm font-medium text-slate-800" }, s.nombre), /* @__PURE__ */ React.createElement("button", { onClick: () => eliminarSucursal(s.nombre), className: "text-red-500 text-xs hover:text-red-700" }, "Quitar")), /* @__PURE__ */ React.createElement(
     "input",
     {
@@ -4539,7 +4587,7 @@ function App() {
   if (!user) {
     return /* @__PURE__ */ React.createElement(LoginScreen, { usuarios, sucursales, empresa, onLogin: (u) => {
       setUser(u);
-      setTab(u.rol === "vendedor" ? "accesorios" : "cotizador");
+      setTab(tabsDeUsuario(u)[0] || "cotizador");
     } });
   }
   const isAdmin = user.rol === "admin";
@@ -4551,26 +4599,12 @@ function App() {
   }
   const empresaMostrar = empresaParaSucursal(user.sucursal);
   const bloqueVersionSistema = /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-blue-200 uppercase tracking-wide leading-none" }, "Sistema actualizado el"), /* @__PURE__ */ React.createElement("p", { className: "text-sm font-semibold text-white leading-tight mt-0.5" }, VERSION_SISTEMA_FECHA));
+  const permitidas = tabsDeUsuario(user);
   const tabs = [
-    { id: "cotizador", label: "Cotizador MO" },
-    { id: "servicios", label: "Service" },
-    { id: "otros-servicios", label: "Otros Servicios" },
-    { id: "prepagos", label: "Prepagos Ford Protect" },
-    { id: "garantia-ext", label: "Garantía Extendida" },
-    { id: "accesorios", label: "Accesorios" },
-    { id: "crm", label: "CRM" },
-    ...puedeVerQuickLane(user) ? [{ id: "combos-multimarca", label: "Combos Multimarca" }] : [],
-    { id: "presupuesto", label: `Presupuesto${carrito.length ? ` (${carrito.length})` : ""}` },
-    { id: "historial", label: "Historial" },
-    ...puedeEditarCatalogos ? [
-      { id: "precios", label: "Precios MO" },
-      { id: "admin-servicios", label: "Catálogo Service" }
-    ] : [],
-    ...isAdmin ? [
-      { id: "usuarios", label: "Usuarios" }
-    ] : []
-  ].filter((t) => user.rol !== "vendedor" || ["accesorios", "prepagos", "garantia-ext", "presupuesto", "historial"].includes(t.id)).filter((t) => !Array.isArray(user.tabs) || user.tabs.includes(t.id));
-  if (user.rol !== "vendedor" && !Array.isArray(user.tabs)) tabs.splice(tabs.findIndex((t) => t.id === "historial") + 1, 0, { id: "stock", label: "Stock repuestos" });
+    ...TABS_SISTEMA.filter((t) => permitidas.includes(t.id)).map((t) => t.id === "presupuesto" ? { ...t, label: `Presupuesto${carrito.length ? ` (${carrito.length})` : ""}` } : t),
+    ...isAdmin ? [{ id: "usuarios", label: "Usuarios" }] : []
+  ];
+  if (!tabs.length) tabs.push({ id: "sin-acceso", label: "Sin accesos" });
   const tabActiva = tabs.some((t) => t.id === tab) ? tab : tabs[0].id;
   const bloqueStock = React.createElement("div", null, React.createElement("p", { className: "text-[10px] text-blue-200 uppercase tracking-wide leading-none" }, "Stock Karam al"), React.createElement("p", { className: "text-sm font-semibold text-white leading-tight mt-0.5" }, stockSt.data ? fmtFechaHora(stockSt.data.fechaStock || stockSt.data.actualizado, stockSt.data.soloFecha) : "sin cargar"));
   return /* @__PURE__ */ React.createElement("div", { className: "min-h-screen bg-slate-50" }, /* @__PURE__ */ React.createElement("header", { className: "bg-[#12181f] border-b border-[#2a3441]" }, /* @__PURE__ */ React.createElement("div", { className: "max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3 min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-sm shrink-0" }, "T"), /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("p", { className: "text-white text-sm font-medium leading-none truncate" }, user.nombre, " ", user.apellido), /* @__PURE__ */ React.createElement("p", { className: "text-slate-500 text-xs mt-0.5 truncate" }, empresa.nombre, " · ", user.sucursal))), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3 shrink-0" }, FECHA_INDEX_HTML && React.createElement("span", { className: "text-slate-500 text-[10px] leading-tight text-right", title: "Última modificación del sistema (index.html)" }, "Actualizado", React.createElement("br", null), FECHA_INDEX_HTML), React.createElement("button", { onClick: () => setUser(null), className: "text-slate-400 hover:text-white text-xs shrink-0" }, "Cerrar sesión"))), /* @__PURE__ */ React.createElement("div", { className: "bg-gradient-to-r from-blue-700 via-blue-600 to-blue-700 px-4 py-3 border-y-2 border-blue-400" }, /* @__PURE__ */ React.createElement("div", { className: "max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-x-6 gap-y-2" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-blue-100 font-bold uppercase tracking-wide leading-none" }, "💰 Valor hora de mano de obra"), /* @__PURE__ */ React.createElement("p", { className: "text-2xl sm:text-3xl font-extrabold text-white leading-tight mt-0.5" }, fmtMoney(valorHora))), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-x-5 gap-y-1 text-right" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-blue-200 uppercase tracking-wide leading-none" }, "Hoy"), /* @__PURE__ */ React.createElement("p", { className: "text-sm font-semibold text-white leading-tight mt-0.5" }, (/* @__PURE__ */ new Date()).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" }))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-blue-200 uppercase tracking-wide leading-none" }, "Precios MO vigentes desde"), /* @__PURE__ */ React.createElement("p", { className: "text-sm font-semibold text-white leading-tight mt-0.5" }, (pautasVersion == null ? void 0 : pautasVersion.fecha) || "sin registrar")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-blue-200 uppercase tracking-wide leading-none" }, "Service actualizado"), /* @__PURE__ */ React.createElement("p", { className: "text-sm font-semibold text-white leading-tight mt-0.5" }, serviciosActualizado ? serviciosActualizado.split(",")[0].split(" ")[0] : "sin registrar")), bloqueStock, bloqueVersionSistema))), /* @__PURE__ */ React.createElement("div", { className: "max-w-6xl mx-auto px-4 flex gap-1 overflow-x-auto" }, tabs.map((t) => /* @__PURE__ */ React.createElement(
@@ -4586,7 +4620,7 @@ function App() {
     agregarAlCarrito(lineas, vehiculo);
     setPrefillPresupuesto({ cliente, origen });
     setTab("presupuesto");
-  } }), tabActiva === "combos-multimarca" && puedeVerQuickLane(user) && /* @__PURE__ */ React.createElement(CombosMultimarcaTab, { combos: combosMM, onAgregarCarrito: agregarAlCarrito, user, empresa: empresaMostrar }), tabActiva === "presupuesto" && /* @__PURE__ */ React.createElement(PresupuestoTab, { carrito, setCarrito, pautas, empresa: empresaMostrar, sucursales, user, vehiculoSugerido, onLimpiarVehiculo: () => setVehiculoSugerido(null), onGuardado: setPresupuestos, edicionActual, onConsumirEdicion: () => setEdicionActual(null), crmClientes: clientesVisiblesCRM(crmClientes, user), prefill: prefillPresupuesto, onConsumirPrefill: () => setPrefillPresupuesto(null) }), tabActiva === "historial" && /* @__PURE__ */ React.createElement(HistorialTab, { presupuestos, setPresupuestos, empresaParaSucursal, sucursales, isAdmin: isAdmin || verTodoConcesionario(user), user, onEditar: cargarParaEditar, crmClientes }), tabActiva === "precios" && puedeEditarCatalogos && /* @__PURE__ */ React.createElement(AdminPautas, { pautas, setPautas, valorHora, setValorHora, versionInfo: pautasVersion, setVersionInfo: setPautasVersion, isAdmin, user }), tabActiva === "admin-servicios" && puedeEditarCatalogos && /* @__PURE__ */ React.createElement(AdminServicios, { servicios, setServicios, actualizadoEn: serviciosActualizado, setActualizadoEn: setServiciosActualizado, extras, setExtras, setCombosMM }), tabActiva === "stock" && React.createElement(StockTab, { user, sucursales }), tabActiva === "usuarios" && isAdmin && /* @__PURE__ */ React.createElement(AdminUsuarios, { usuarios, setUsuarios, sucursales, setSucursales, empresa, setEmpresa })));
+  } }), tabActiva === "combos-multimarca" && /* @__PURE__ */ React.createElement(CombosMultimarcaTab, { combos: combosMM, onAgregarCarrito: agregarAlCarrito, user, empresa: empresaMostrar }), tabActiva === "presupuesto" && /* @__PURE__ */ React.createElement(PresupuestoTab, { carrito, setCarrito, pautas, empresa: empresaMostrar, sucursales, user, vehiculoSugerido, onLimpiarVehiculo: () => setVehiculoSugerido(null), onGuardado: setPresupuestos, edicionActual, onConsumirEdicion: () => setEdicionActual(null), crmClientes: clientesVisiblesCRM(crmClientes, user), prefill: prefillPresupuesto, onConsumirPrefill: () => setPrefillPresupuesto(null) }), tabActiva === "historial" && /* @__PURE__ */ React.createElement(HistorialTab, { presupuestos, setPresupuestos, empresaParaSucursal, sucursales, isAdmin: isAdmin || verTodoConcesionario(user), user, onEditar: cargarParaEditar, crmClientes }), tabActiva === "precios" && puedeEditarCatalogos && /* @__PURE__ */ React.createElement(AdminPautas, { pautas, setPautas, valorHora, setValorHora, versionInfo: pautasVersion, setVersionInfo: setPautasVersion, isAdmin, user }), tabActiva === "admin-servicios" && puedeEditarCatalogos && /* @__PURE__ */ React.createElement(AdminServicios, { servicios, setServicios, actualizadoEn: serviciosActualizado, setActualizadoEn: setServiciosActualizado, extras, setExtras, setCombosMM }), tabActiva === "stock" && React.createElement(StockTab, { user, sucursales }), tabActiva === "sin-acceso" && React.createElement("p", { className: "text-sm text-slate-500 text-center py-16" }, "Tu usuario no tiene pestañas habilitadas. Pedile acceso a Ruben."), tabActiva === "usuarios" && isAdmin && /* @__PURE__ */ React.createElement(AdminUsuarios, { usuarios, setUsuarios, sucursales, setSucursales, empresa, setEmpresa })));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(/* @__PURE__ */ React.createElement(App, null));
 
