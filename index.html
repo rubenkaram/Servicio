@@ -299,10 +299,11 @@ function normalizarSucursales(lista) {
   const faltantes = SUCURSALES_DEFAULT.filter((d) => !nombresExistentes.has(d.nombre));
   return faltantes.length > 0 ? [...normalizada, ...faltantes] : normalizada;
 }
-function normalizarUsuarios(lista) {
-  if (!Array.isArray(lista)) return USUARIOS_DEFAULT;
+function normalizarUsuarios(lista, eliminados) {
+  const borrados = new Set(Array.isArray(eliminados) ? eliminados : []);
+  if (!Array.isArray(lista)) return USUARIOS_DEFAULT.filter((d) => !borrados.has(d.id));
   const idsExistentes = new Set(lista.map((u) => u.id));
-  const faltantes = USUARIOS_DEFAULT.filter((d) => !idsExistentes.has(d.id));
+  const faltantes = USUARIOS_DEFAULT.filter((d) => !idsExistentes.has(d.id) && !borrados.has(d.id));
   let resultado = faltantes.length > 0 ? [...lista, ...faltantes] : lista;
   const idsConNuevoPermiso = ["u_mica", "u_mili"];
   resultado = resultado.map(
@@ -3014,6 +3015,17 @@ function AdminUsuarios({ usuarios, setUsuarios, sucursales, setSucursales, empre
     setForm({ nombre: "", apellido: "", correo: "", sucursal: sucursales[0] ? sucursales[0].nombre : "", pin: "", rol: "operador", permisoCatalogos: false });
   }
   async function eliminar(id) {
+    const u0 = usuarios.find((u) => u.id === id);
+    if (!confirm(`¿Eliminar a ${u0 ? `${u0.nombre} ${u0.apellido || ""}`.trim() : "este usuario"}?`)) return;
+    if (USUARIOS_DEFAULT.some((d) => d.id === id)) {
+      const r = await leerClaveSegura("usuarios_eliminados_v1");
+      if (!r.ok) {
+        alert("No hay conexión con la base de datos. Probá de nuevo.");
+        return;
+      }
+      const lista = Array.isArray(r.valor) ? r.valor : [];
+      if (!lista.includes(id)) await persist("usuarios_eliminados_v1", [...lista, id]);
+    }
     const next = usuarios.filter((u) => u.id !== id);
     setUsuarios(next);
     await persist("usuarios_v1", next);
@@ -4456,7 +4468,7 @@ function App() {
   const [tab, setTab] = React.useState("cotizador");
   const stockSt = useStock();
   async function cargarTodo() {
-    const [pRaw, sRaw, uRaw, sucRaw, emp, pres, vh, ext, pautasVer, servVer, mmRaw, crmRaw] = await Promise.all([
+    const [pRaw, sRaw, uRaw, sucRaw, emp, pres, vh, ext, pautasVer, servVer, mmRaw, crmRaw, elimRaw] = await Promise.all([
       loadOrSeed("pautas_v1", PAUTAS_DATA),
       loadOrSeed("servicios_v3", SERVICIOS_DATA),
       loadOrSeed("usuarios_v1", USUARIOS_DEFAULT),
@@ -4468,12 +4480,13 @@ function App() {
       loadOrSeed("pautas_version_v1", null),
       loadOrSeed("servicios_actualizado_en", null),
       loadOrSeed("combos_multimarca_v1", COMBOS_MULTIMARCA_DATA),
-      loadOrSeed("crm_clientes_v1", CRM_SEED)
+      loadOrSeed("crm_clientes_v1", CRM_SEED),
+      leerClaveSegura("usuarios_eliminados_v1")
     ]);
     const p = normalizarPautas(pRaw);
     const s = normalizarServicios(sRaw);
     const suc = normalizarSucursales(sucRaw);
-    const u = normalizarUsuarios(uRaw);
+    const u = elimRaw && elimRaw.ok ? normalizarUsuarios(uRaw, elimRaw.valor) : Array.isArray(uRaw) ? uRaw : normalizarUsuarios(uRaw);
     const ex = normalizarExtras(ext);
     if (JSON.stringify(p) !== JSON.stringify(pRaw)) persist("pautas_v1", p);
     if (JSON.stringify(s) !== JSON.stringify(sRaw)) persist("servicios_v3", s);
