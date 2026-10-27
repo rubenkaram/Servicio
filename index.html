@@ -2,6 +2,9 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>KARAM AUTOMOTORES SA — Sistema de Mano de Obra y Service</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
@@ -246,6 +249,32 @@ function normalizeText(s) {
 }
 const SUPABASE_URL = "https://awbutkltzrvyyqdvmska.supabase.co";
 const SUPABASE_KEY = "sb_publishable_btSBAmCCQqCIx8fa4cDkmw_2l-NDuFu";
+// ── Protección de datos ──────────────────────────────────────────────
+// BUILD_ID identifica esta versión del sistema. Cuando se sube una lista de precios,
+// se guarda en la base "build_minimo". Cualquier dispositivo con una versión MÁS VIEJA
+// abierta (pestaña olvidada, celular con la app en segundo plano) queda bloqueado para
+// escribir y se recarga solo, así nunca puede pisar los precios nuevos con los viejos.
+const BUILD_ID = 2026102701;
+let ESCRITURA_BLOQUEADA = false;
+// Lee una clave nueva; si todavía no existe, la crea UNA sola vez copiando la clave vieja
+// (o los datos de fábrica si se pide). Nunca escribe nada si la lectura falla.
+async function cargarMigrado(clave, claveVieja, fallback, usarFabrica) {
+  const r = await leerClaveSegura(clave);
+  if (!r.ok) return { ok: false, valor: fallback };
+  if (r.valor !== void 0 && r.valor !== null) return { ok: true, valor: r.valor };
+  let inicial = fallback;
+  if (!usarFabrica && claveVieja) {
+    const v = await leerClaveSegura(claveVieja);
+    if (!v.ok) return { ok: false, valor: fallback };
+    if (v.valor !== void 0 && v.valor !== null) inicial = v.valor;
+  }
+  // Re-chequeo justo antes de crear, por si otro dispositivo la creó recién.
+  const r2 = await leerClaveSegura(clave);
+  if (!r2.ok) return { ok: false, valor: fallback };
+  if (r2.valor !== void 0 && r2.valor !== null) return { ok: true, valor: r2.valor };
+  await persist(clave, inicial);
+  return { ok: true, valor: inicial };
+}
 async function loadOrSeed(key, fallback) {
   return (await loadOrSeedEx(key, fallback)).valor;
 }
@@ -279,6 +308,7 @@ async function loadOrSeedEx(key, fallback) {
   return { ok: true, valor: fallback };
 }
 async function persist(key, value) {
+  if (ESCRITURA_BLOQUEADA) return false;
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/app_data`, {
       method: "POST",
@@ -946,7 +976,7 @@ function NuevaTarea({ pautas, setPautas, user, valorHora }) {
     };
     const next = [...pautas, nueva];
     setPautas(next);
-    await persist("pautas_v1", next);
+    await persist("pautas_v2", next);
     setTarea("");
     setHoras("");
     setHorasComerciales("");
@@ -1845,7 +1875,7 @@ function waNumero(t) {
 }
 async function leerClaveSegura(key) {
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/app_data?clave=eq.${encodeURIComponent(key)}&select=valor`, { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } });
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/app_data?clave=eq.${encodeURIComponent(key)}&select=valor`, { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" });
     if (!res.ok) return { ok: false };
     const filas = await res.json();
     return { ok: true, valor: filas.length ? filas[0].valor : void 0 };
@@ -2926,7 +2956,7 @@ function AdminPautas({ pautas, setPautas, valorHora, setValorHora, versionInfo, 
       return { ...r, h, hc, pc, ps };
     });
     setPautas(next);
-    await persist("pautas_v1", next);
+    await persist("pautas_v2", next);
     setEdits((e) => {
       const c = { ...e };
       set.forEach((i) => delete c[i]);
@@ -2941,7 +2971,7 @@ function AdminPautas({ pautas, setPautas, valorHora, setValorHora, versionInfo, 
   async function eliminarTarea(idx) {
     const next = pautas.filter((_, i) => i !== idx);
     setPautas(next);
-    await persist("pautas_v1", next);
+    await persist("pautas_v2", next);
   }
   async function guardarVersionInfo(fechaPlanilla, nombreArchivo) {
     const info = { fecha: fechaPlanilla, archivo: nombreArchivo, importadoEl: (/* @__PURE__ */ new Date()).toLocaleString("es-AR") };
@@ -2950,13 +2980,13 @@ function AdminPautas({ pautas, setPautas, valorHora, setValorHora, versionInfo, 
   }
   async function reemplazarPautas(nuevaData, fechaPlanilla, nombreArchivo) {
     setPautas(nuevaData);
-    await persist("pautas_v1", nuevaData);
+    await persist("pautas_v2", nuevaData);
     await guardarVersionInfo(fechaPlanilla, nombreArchivo);
   }
   async function fusionarPautasHandler(nuevaData, fechaPlanilla, nombreArchivo) {
     const { resultado } = fusionarPautas(pautas, nuevaData);
     setPautas(resultado);
-    await persist("pautas_v1", resultado);
+    await persist("pautas_v2", resultado);
     await guardarVersionInfo(fechaPlanilla, nombreArchivo);
   }
   async function aplicarValorHora() {
@@ -2967,7 +2997,7 @@ function AdminPautas({ pautas, setPautas, valorHora, setValorHora, versionInfo, 
       return { ...r, pc, ps: Math.round(pc / 1.21) };
     });
     setPautas(next);
-    await persist("pautas_v1", next);
+    await persist("pautas_v2", next);
     setValorHora(nuevo);
     await persist("valor_hora_v1", nuevo);
     setConfirmandoValorHora(false);
@@ -3083,7 +3113,7 @@ function AdminUsuarios({ usuarios, setUsuarios, sucursales, setSucursales, empre
   async function guardarUsuario(nuevo) {
     const next = usuarios.map((u) => u.id === nuevo.id ? nuevo : u);
     setUsuarios(next);
-    const ok = await persist("usuarios_v1", next);
+    const ok = await persist("usuarios_v2", next);
     if (!ok) alert("No se pudo guardar. Probá de nuevo.");
   }
   async function agregar() {
@@ -3092,7 +3122,7 @@ function AdminUsuarios({ usuarios, setUsuarios, sucursales, setSucursales, empre
     const nueva = { id: uid(), ...datos, ...permisoCatalogos ? { permisos: { catalogos: true } } : {} };
     const next = [...usuarios, nueva];
     setUsuarios(next);
-    await persist("usuarios_v1", next);
+    await persist("usuarios_v2", next);
     setForm({ nombre: "", apellido: "", correo: "", sucursal: sucursales[0] ? sucursales[0].nombre : "", pin: "", rol: "operador", permisoCatalogos: false });
   }
   async function eliminar(id) {
@@ -3109,7 +3139,7 @@ function AdminUsuarios({ usuarios, setUsuarios, sucursales, setSucursales, empre
     }
     const next = usuarios.filter((u) => u.id !== id);
     setUsuarios(next);
-    await persist("usuarios_v1", next);
+    await persist("usuarios_v2", next);
   }
   async function togglePermisoCatalogos(id) {
     const next = usuarios.map(
@@ -3119,14 +3149,14 @@ function AdminUsuarios({ usuarios, setUsuarios, sucursales, setSucursales, empre
       }
     );
     setUsuarios(next);
-    await persist("usuarios_v1", next);
+    await persist("usuarios_v2", next);
   }
   async function cambiarPin(id, nuevoPin) {
     const limpio = nuevoPin.replace(/\D/g, "").slice(0, 6);
     if (!limpio) return;
     const next = usuarios.map((u) => u.id === id ? { ...u, pin: limpio } : u);
     setUsuarios(next);
-    const ok = await persist("usuarios_v1", next);
+    const ok = await persist("usuarios_v2", next);
     setPinDrafts((d) => {
       const c = { ...d };
       delete c[id];
@@ -3143,18 +3173,18 @@ function AdminUsuarios({ usuarios, setUsuarios, sucursales, setSucursales, empre
     if (!nuevaSucursal.trim()) return;
     const next = [...sucursales, { nombre: nuevaSucursal.trim(), direccion: "", telefono: "", correo: "" }];
     setSucursales(next);
-    await persist("sucursales_v1", next);
+    await persist("sucursales_v2", next);
     setNuevaSucursal("");
   }
   async function eliminarSucursal(nombre) {
     const next = sucursales.filter((x) => x.nombre !== nombre);
     setSucursales(next);
-    await persist("sucursales_v1", next);
+    await persist("sucursales_v2", next);
   }
   async function actualizarSucursal(nombre, campo, valor) {
     const next = sucursales.map((s) => s.nombre === nombre ? { ...s, [campo]: valor } : s);
     setSucursales(next);
-    await persist("sucursales_v1", next);
+    await persist("sucursales_v2", next);
   }
   async function guardarEmpresa() {
     const next = { ...empresa, nombre: nombreEmpresa };
@@ -3163,8 +3193,8 @@ function AdminUsuarios({ usuarios, setUsuarios, sucursales, setSucursales, empre
   }
   async function descargarCopiaSeguridad() {
     const [pautas, servicios, presupuestos] = await Promise.all([
-      loadOrSeed("pautas_v1", PAUTAS_DATA),
-      loadOrSeed("servicios_v3", SERVICIOS_DATA),
+      loadOrSeed("pautas_v2", PAUTAS_DATA),
+      loadOrSeed("servicios_v4", SERVICIOS_DATA),
       loadOrSeed("presupuestos_v1", [])
     ]);
     const backup = { generadoEn: (/* @__PURE__ */ new Date()).toISOString(), empresa, sucursales, usuarios, pautas, servicios: normalizarServicios(servicios), presupuestos };
@@ -3859,7 +3889,7 @@ function AdminServicios({ servicios, setServicios, actualizadoEn, setActualizado
     const cats = new Set(nuevos.map((c) => c.categoria));
     const ex = [...nuevos, ...(extras || []).filter((e) => !cats.has(e.categoria))];
     setExtras(ex);
-    await persist("extras_v2", ex);
+    await persist("extras_v3", ex);
     if (r.multimarca.length) {
       setCombosMM(r.multimarca);
       await persist("combos_multimarca_v1", r.multimarca);
@@ -3867,19 +3897,21 @@ function AdminServicios({ servicios, setServicios, actualizadoEn, setActualizado
   }
   const [form, setForm] = React.useState({ categoria: "Auto", titulo: "", km: "", precio: "", horas: "", incluye: "" });
   async function reemplazarCatalogo(nuevaData, nuevosExtras) {
-    const guardado = await persist("servicios_v3", nuevaData);
-    const chequeo = guardado ? await leerClaveSegura("servicios_v3") : { ok: false };
+    const guardado = await persist("servicios_v4", nuevaData);
+    const chequeo = guardado ? await leerClaveSegura("servicios_v4") : { ok: false };
     const firma = (d) => (Array.isArray(d) ? d : []).map((b) => b.titulo + ":" + (b.servicios || []).map((x) => x.km + "=" + x.precioLista).join(",")).join("|");
     if (!chequeo.ok || firma(chequeo.valor) !== firma(nuevaData)) {
       alert("⚠ La lista de precios NO se pudo guardar en la base de datos. No se aplicó ningún cambio. Revisá la conexión y volvé a subir el Excel.");
       return;
     }
     setServicios(nuevaData);
+    const bm = await leerClaveSegura("build_minimo");
+    if (bm.ok && !(typeof bm.valor === "number" && bm.valor >= BUILD_ID)) await persist("build_minimo", BUILD_ID);
     alert(`✓ Lista de precios guardada y verificada en la base (${nuevaData.length} modelos).`);
     if (nuevosExtras && nuevosExtras.length > 0 && setExtras) {
       const ex = fusionarExtras(extras, nuevosExtras);
       setExtras(ex);
-      await persist("extras_v2", ex);
+      await persist("extras_v3", ex);
     }
     const fecha = (/* @__PURE__ */ new Date()).toLocaleString("es-AR");
     setActualizadoEn(fecha);
@@ -3898,7 +3930,12 @@ function AdminServicios({ servicios, setServicios, actualizadoEn, setActualizado
       manoObraPesos: null,
       items: form.incluye.split(",").map((s) => s.trim()).filter(Boolean).map((nombre) => ({ nombre, codigo: null, precio: 0 }))
     };
-    let next = [...servicios];
+    const fresco = await leerClaveSegura("servicios_v4");
+    if (!fresco.ok || !Array.isArray(fresco.valor)) {
+      alert("No hay conexión con la base de datos. No se guardó nada, probá de nuevo.");
+      return;
+    }
+    let next = [...fresco.valor];
     const idx = next.findIndex((b) => b.titulo === form.titulo && b.categoria === form.categoria);
     if (idx >= 0) {
       const bloque = { ...next[idx] };
@@ -3908,13 +3945,18 @@ function AdminServicios({ servicios, setServicios, actualizadoEn, setActualizado
       next.push({ categoria: form.categoria, titulo: form.titulo, servicios: [nuevoServicio] });
     }
     setServicios(next);
-    await persist("servicios_v3", next);
+    await persist("servicios_v4", next);
     setForm({ ...form, km: "", precio: "", horas: "", incluye: "" });
   }
   async function eliminarBloque(titulo) {
-    const next = servicios.filter((b) => b.titulo !== titulo);
+    const fresco = await leerClaveSegura("servicios_v4");
+    if (!fresco.ok || !Array.isArray(fresco.valor)) {
+      alert("No hay conexión con la base de datos. No se borró nada, probá de nuevo.");
+      return;
+    }
+    const next = fresco.valor.filter((b) => b.titulo !== titulo);
     setServicios(next);
-    await persist("servicios_v3", next);
+    await persist("servicios_v4", next);
   }
   return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(CargarPlanillaServicios, { onReemplazar: reemplazarCatalogo, cantidadActual: servicios.length }), /* @__PURE__ */ React.createElement(CargarPlanillaCombos, { onAplicar: aplicarCombos }), actualizadoEn && /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400 mb-4" }, "Última actualización del catálogo: ", actualizadoEn), /* @__PURE__ */ React.createElement("div", { className: "grid lg:grid-cols-2 gap-6" }, /* @__PURE__ */ React.createElement("div", { className: "bg-white rounded-xl border border-slate-200 p-5" }, /* @__PURE__ */ React.createElement("h2", { className: "font-semibold text-slate-800 mb-4" }, "Agregar / editar un tramo manualmente"), /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement("select", { value: form.categoria, onChange: (e) => setForm({ ...form, categoria: e.target.value }), className: "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" }, /* @__PURE__ */ React.createElement("option", null, "Auto"), /* @__PURE__ */ React.createElement("option", null, "SUV"), /* @__PURE__ */ React.createElement("option", null, "Pick up / Utilitario")), /* @__PURE__ */ React.createElement("input", { placeholder: "Modelo / motorización (ej: Ranger 3.2L)", value: form.titulo, onChange: (e) => setForm({ ...form, titulo: e.target.value }), className: "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" }), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-3 gap-2" }, /* @__PURE__ */ React.createElement("input", { placeholder: "Km", value: form.km, onChange: (e) => setForm({ ...form, km: e.target.value }), className: "border border-slate-300 rounded-lg px-3 py-2 text-sm" }), /* @__PURE__ */ React.createElement("input", { placeholder: "Precio", value: form.precio, onChange: (e) => setForm({ ...form, precio: e.target.value }), className: "border border-slate-300 rounded-lg px-3 py-2 text-sm" }), /* @__PURE__ */ React.createElement("input", { placeholder: "Horas MO", value: form.horas, onChange: (e) => setForm({ ...form, horas: e.target.value }), className: "border border-slate-300 rounded-lg px-3 py-2 text-sm" })), /* @__PURE__ */ React.createElement("textarea", { placeholder: "Incluye (separado por comas)", value: form.incluye, onChange: (e) => setForm({ ...form, incluye: e.target.value }), className: "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm h-20" }), /* @__PURE__ */ React.createElement("button", { onClick: agregar, className: "w-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-2.5 rounded-lg" }, "Guardar tramo de service"))), /* @__PURE__ */ React.createElement("div", { className: "bg-white rounded-xl border border-slate-200 p-5 max-h-[560px] overflow-y-auto" }, /* @__PURE__ */ React.createElement("h2", { className: "font-semibold text-slate-800 mb-4" }, "Catálogo cargado (", servicios.length, " modelos)"), /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, servicios.map((b) => /* @__PURE__ */ React.createElement("div", { key: b.titulo, className: "border border-slate-200 rounded-lg p-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between mb-1" }, /* @__PURE__ */ React.createElement("p", { className: "text-sm font-medium text-slate-800" }, b.titulo), /* @__PURE__ */ React.createElement("button", { onClick: () => eliminarBloque(b.titulo), className: "text-xs text-red-500 hover:text-red-700" }, "Eliminar")), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500" }, b.categoria, " · ", b.servicios.length, " tramos de km")))))));
 }
@@ -4562,16 +4604,33 @@ function App() {
   const stockSt = useStock();
   const yaCargoRef = React.useRef(false);
   const [sinConexionBD, setSinConexionBD] = React.useState(false);
+  const [versionVieja, setVersionVieja] = React.useState(false);
   async function cargarTodo() {
+    const vMin = await leerClaveSegura("build_minimo");
+    if (vMin.ok && typeof vMin.valor === "number" && vMin.valor > BUILD_ID) {
+      ESCRITURA_BLOQUEADA = true;
+      setVersionVieja(true);
+      let intentos = 0;
+      try { intentos = Number(sessionStorage.getItem("karam_recarga") || 0); } catch (e) {}
+      if (intentos < 2) {
+        try { sessionStorage.setItem("karam_recarga", String(intentos + 1)); } catch (e) {}
+        location.replace(location.pathname + "?v=" + Date.now());
+      }
+      return;
+    }
+    try { sessionStorage.removeItem("karam_recarga"); } catch (e) {}
+    // Esta es la versión más nueva que existe: se marca como mínima para que cualquier
+    // dispositivo con una versión anterior quede bloqueado y se actualice.
+    if (vMin.ok && !(typeof vMin.valor === "number" && vMin.valor >= BUILD_ID)) persist("build_minimo", BUILD_ID);
     const r = await Promise.all([
-      loadOrSeedEx("pautas_v1", PAUTAS_DATA),
-      loadOrSeedEx("servicios_v3", SERVICIOS_DATA),
-      loadOrSeedEx("usuarios_v1", USUARIOS_DEFAULT),
-      loadOrSeedEx("sucursales_v1", SUCURSALES_DEFAULT),
+      cargarMigrado("pautas_v2", "pautas_v1", PAUTAS_DATA),
+      cargarMigrado("servicios_v4", "servicios_v3", SERVICIOS_DATA, true),
+      cargarMigrado("usuarios_v2", "usuarios_v1", USUARIOS_DEFAULT),
+      cargarMigrado("sucursales_v2", "sucursales_v1", SUCURSALES_DEFAULT),
       loadOrSeedEx("empresa_v1", EMPRESA_DEFAULT),
       loadOrSeedEx("presupuestos_v1", []),
       loadOrSeedEx("valor_hora_v1", VALOR_HORA_DEFAULT),
-      loadOrSeedEx("extras_v2", EXTRAS_DATA),
+      cargarMigrado("extras_v3", "extras_v2", EXTRAS_DATA),
       loadOrSeedEx("pautas_version_v1", null),
       loadOrSeedEx("servicios_actualizado_en", null),
       loadOrSeedEx("combos_multimarca_v1", COMBOS_MULTIMARCA_DATA),
@@ -4590,11 +4649,11 @@ function App() {
     const suc = normalizarSucursales(sucRaw);
     const u = elimRaw && elimRaw.ok ? normalizarUsuarios(uRaw, elimRaw.valor) : Array.isArray(uRaw) ? uRaw : normalizarUsuarios(uRaw);
     const ex = normalizarExtras(ext);
-    if (pR.ok && p !== pRaw && JSON.stringify(p) !== JSON.stringify(pRaw)) persist("pautas_v1", p);
-    if (sR.ok && s !== sRaw) persist("servicios_v3", s);
-    if (sucR.ok && JSON.stringify(suc) !== JSON.stringify(sucRaw)) persist("sucursales_v1", suc);
-    if (uR.ok && JSON.stringify(u) !== JSON.stringify(uRaw)) persist("usuarios_v1", u);
-    if (extR.ok && JSON.stringify(ex) !== JSON.stringify(ext)) persist("extras_v2", ex);
+    if (pR.ok && p !== pRaw && JSON.stringify(p) !== JSON.stringify(pRaw)) persist("pautas_v2", p);
+    // La lista de precios del service SOLO se escribe al subir el Excel. Nunca al cargar.
+    if (sucR.ok && JSON.stringify(suc) !== JSON.stringify(sucRaw)) persist("sucursales_v2", suc);
+    if (uR.ok && JSON.stringify(u) !== JSON.stringify(uRaw)) persist("usuarios_v2", u);
+    if (extR.ok && JSON.stringify(ex) !== JSON.stringify(ext)) persist("extras_v3", ex);
     if (usar(pR)) setPautas(p);
     if (usar(sR)) setServicios(s);
     if (usar(uR)) setUsuarios(u);
@@ -4635,6 +4694,9 @@ function App() {
     setEdicionActual({ id: p.id, numero: p.numero, cliente: p.cliente || { nombre: "", telefono: "", dni: "" }, unidad: p.unidad || { modelo: "", motor: "", patente: "", anio: "", km: "" } });
     setVehiculoSugerido(null);
     setTab("presupuesto");
+  }
+  if (versionVieja) {
+    return React.createElement("div", { className: "min-h-screen bg-[#12181f] flex items-center justify-center p-6" }, React.createElement("div", { className: "bg-white rounded-xl p-6 max-w-sm text-center" }, React.createElement("p", { className: "font-semibold text-slate-800 mb-2" }, "Hay una versión nueva del sistema"), React.createElement("p", { className: "text-sm text-slate-600 mb-4" }, "Esta pantalla quedó desactualizada y podría mostrar precios viejos. Tocá el botón para actualizar."), React.createElement("button", { onClick: () => location.replace(location.pathname + "?v=" + Date.now()), className: "w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2.5 rounded-lg" }, "Actualizar ahora")));
   }
   if (loading) {
     return /* @__PURE__ */ React.createElement("div", { className: "min-h-screen bg-[#12181f] flex items-center justify-center text-slate-400 text-sm" }, "Cargando sistema…");
