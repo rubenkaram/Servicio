@@ -1545,7 +1545,7 @@ function parsearStockWorkbook(wb) {
     const hdr = filas[hi].map((c) => normalizeText(c));
     const iC = hdr.indexOf("codigo"), iQ = hdr.indexOf("cantidad");
     const iD = hdr.findIndex((c) => c.startsWith("descrip")), iU = hdr.findIndex((c) => c.startsWith("ubicac"));
-    let iT = hdr.findIndex((c) => c.startsWith("t venta") || c.startsWith("t lista"));
+    let iT = hdr.findIndex((c) => /^t\W*(venta|lista)/.test(c));
     if (iT < 0) iT = hdr.length - 1;
     const items = {}, totVenta = {};
     for (let i = hi + 1; i < filas.length; i++) {
@@ -1701,6 +1701,9 @@ function indiceCodigos() {
   if (d && d.sucursales) Object.values(d.sucursales).forEach((suc) => Object.entries(suc || {}).forEach(([k, v]) => {
     if (!m[k]) m[k] = { k, cod: v[1], desc: v[2] };
     if (!m[k].precio && v[4] > 0) m[k].precio = Math.round(v[4] * 1.21);
+  }));
+  if (d !== STOCK_SEED && STOCK_SEED.sucursales) Object.values(STOCK_SEED.sucursales).forEach((suc) => Object.entries(suc || {}).forEach(([k, v]) => {
+    if (m[k] && !m[k].precio && v[4] > 0) m[k].precio = Math.round(v[4] * 1.21);
   }));
   ACC_DATA.forEach((a) => {
     const k = normCod(a.pn);
