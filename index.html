@@ -796,8 +796,9 @@ function ServiciosTab({ servicios, onAgregarCarrito, user, empresa }) {
   const [comprobante, setComprobante] = React.useState(false);
   const [numeroComprobante, setNumeroComprobante] = React.useState(null);
   const [agregado, setAgregado] = React.useState(false);
-  const [aplicarFid, setAplicarFid] = React.useState(false);
+  const aplicarFid = false;
   const [aplicarFP, setAplicarFP] = React.useState(false);
+  const [aplicarPP, setAplicarPP] = React.useState(false);
   const categorias = React.useMemo(() => [...new Set(servicios.map((s) => s.categoria))], [servicios]);
   const titulos = React.useMemo(
     () => categoria ? servicios.filter((s) => s.categoria === categoria).map((s) => s.titulo) : [],
@@ -807,18 +808,25 @@ function ServiciosTab({ servicios, onAgregarCarrito, user, empresa }) {
   const service = bloque && km !== null ? bloque.servicios.find((s) => s.km === km) : null;
   const tieneFidelizacion = service && service.descFidelizacion > 0;
   const tieneFordProtect = service && service.descFordProtect > 0;
+  const tienePrepago = service && service.descPrepago > 0;
   function elegirKm(nuevoKm) {
     setKm(nuevoKm);
     const nuevoServicio = bloque ? bloque.servicios.find((s) => s.km === nuevoKm) : null;
-    setAplicarFid(!!(nuevoServicio && nuevoServicio.descFidelizacion > 0));
     setAplicarFP(false);
+    setAplicarPP(false);
   }
-  let precioFinal = service ? service.precioLista : null;
-  if (service) {
+  function factorDescuentos() {
     let factor = 1;
     if (aplicarFid) factor *= 1 - service.descFidelizacion / 100;
     if (aplicarFP) factor *= 1 - service.descFordProtect / 100;
-    precioFinal = Math.round(service.precioLista * factor);
+    if (aplicarPP) factor *= 1 - service.descPrepago / 100;
+    return factor;
+  }
+  let precioFinal = service ? service.precioLista : null;
+  if (service) {
+    precioFinal = Math.round(service.precioLista * factorDescuentos());
+    if (!aplicarFid && aplicarFP && !aplicarPP && service.precioFordProtect) precioFinal = service.precioFordProtect;
+    if (!aplicarFid && aplicarPP && !aplicarFP && service.precioPrepago) precioFinal = service.precioPrepago;
   }
   const waLines = service ? [
     `*Service programado*`,
@@ -827,7 +835,8 @@ function ServiciosTab({ servicios, onAgregarCarrito, user, empresa }) {
     `Incluye: ${service.items.map((i) => i.nombre).join(", ")}`,
     `Precio de lista: ${fmtMoney(service.precioLista)}`,
     aplicarFid ? `Descuento Fidelización (${service.descFidelizacion}%) aplicado` : null,
-    aplicarFP ? `Descuento Clientes Ford Protect (${service.descFordProtect}%) aplicado` : null,
+    aplicarFP ? `Descuento Clientes Ford Protect Garantía Extendida (${service.descFordProtect}%) aplicado` : null,
+    aplicarPP ? `Descuento Clientes Mantenimiento Prepago (${service.descPrepago}%) aplicado` : null,
     `*Precio final: ${fmtMoney(precioFinal)}*`
   ].filter(Boolean).join("\n") : "";
   const waText = encodeURIComponent(waLines);
@@ -835,11 +844,10 @@ function ServiciosTab({ servicios, onAgregarCarrito, user, empresa }) {
     const rawSum = service.items.reduce((a, i) => a + i.precio, 0) + (service.manoObraPesos || 0);
     const partesDesc = [];
     if (aplicarFid) partesDesc.push(`Fidelización ${service.descFidelizacion}%`);
-    if (aplicarFP) partesDesc.push(`Ford Protect ${service.descFordProtect}%`);
+    if (aplicarFP) partesDesc.push(`Garantía Extendida ${service.descFordProtect}%`);
+    if (aplicarPP) partesDesc.push(`Mant. Prepago ${service.descPrepago}%`);
     const sufijoDesc = partesDesc.length ? ` — Desc. ${partesDesc.join(" + ")}` : "";
-    let factor = 1;
-    if (aplicarFid) factor *= 1 - service.descFidelizacion / 100;
-    if (aplicarFP) factor *= 1 - service.descFordProtect / 100;
+    const factor = factorDescuentos();
     const descuentoPct = Math.round((1 - factor) * 1e3) / 10;
     function precioConDescuentoInverso(montoFinal) {
       return descuentoPct > 0 ? Math.round(montoFinal / (1 - descuentoPct / 100)) : Math.round(montoFinal);
@@ -908,7 +916,7 @@ function ServiciosTab({ servicios, onAgregarCarrito, user, empresa }) {
       className: `px-3 py-1.5 rounded-lg border text-sm font-medium transition ${km === s.km ? "bg-emerald-600 text-white border-emerald-600" : "bg-white border-slate-300 text-slate-600 hover:border-emerald-400"}`
     },
     s.km.toLocaleString("es-AR")
-  )), !bloque && /* @__PURE__ */ React.createElement("p", { className: "text-slate-400 text-sm" }, "Elegí primero el modelo."))), /* @__PURE__ */ React.createElement("div", { className: "bg-white rounded-xl border border-slate-200 p-5" }, /* @__PURE__ */ React.createElement("h2", { className: "font-semibold text-slate-800 mb-4 flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-emerald-600" }), " Detalle del service"), !service && /* @__PURE__ */ React.createElement("div", { className: "h-64 flex items-center justify-center text-slate-400 text-sm text-center px-6" }, "Elegí categoría, modelo y kilometraje."), service && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 mb-1" }, titulo), /* @__PURE__ */ React.createElement("p", { className: "font-medium text-slate-800 mb-4" }, "Service de ", km.toLocaleString("es-AR"), " km"), /* @__PURE__ */ React.createElement("p", { className: "text-xs font-medium text-slate-500 mb-2" }, "Ítems que se cambian"), /* @__PURE__ */ React.createElement("ul", { className: "mb-4 space-y-1" }, service.items.map((i) => /* @__PURE__ */ React.createElement("li", { key: i.nombre, className: "text-sm text-slate-700 flex items-start gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-emerald-600 mt-0.5" }, "✓"), /* @__PURE__ */ React.createElement("span", null, i.nombre, i.codigo ? /* @__PURE__ */ React.createElement("span", { className: "text-slate-400 text-xs" }, " (", i.codigo, ")") : ""))), service.items.length === 0 && /* @__PURE__ */ React.createElement("li", { className: "text-sm text-slate-400" }, "Sin ítems de repuesto cargados para este tramo.")), service.horas && /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 mb-3" }, "Mano de obra estimada: ", service.horas, " hs"), /* @__PURE__ */ React.createElement("div", { className: "mb-4 space-y-2" }, /* @__PURE__ */ React.createElement("label", { className: `flex items-center gap-2 text-sm px-3 py-2 rounded-lg border ${tieneFidelizacion ? "border-slate-200 cursor-pointer" : "border-slate-100 text-slate-300"}` }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", disabled: !tieneFidelizacion, checked: aplicarFid, onChange: (e) => setAplicarFid(e.target.checked), className: "accent-emerald-600" }), "Aplicar descuento Fidelización", tieneFidelizacion ? ` (${service.descFidelizacion}%)` : " (no disponible para este tramo)"), /* @__PURE__ */ React.createElement("label", { className: `flex items-center gap-2 text-sm px-3 py-2 rounded-lg border ${tieneFordProtect ? "border-slate-200 cursor-pointer" : "border-slate-100 text-slate-300"}` }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", disabled: !tieneFordProtect, checked: aplicarFP, onChange: (e) => setAplicarFP(e.target.checked), className: "accent-emerald-600" }), "Aplicar descuento Clientes Ford Protect", tieneFordProtect ? ` (${service.descFordProtect}%)` : " (no disponible para este tramo)")), /* @__PURE__ */ React.createElement("div", { className: "bg-emerald-50 border border-emerald-100 rounded-lg p-4 mb-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-sm text-slate-600" }, /* @__PURE__ */ React.createElement("span", null, "Precio de lista"), /* @__PURE__ */ React.createElement("span", null, fmtMoney(service.precioLista))), aplicarFid && /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-sm text-slate-600 mt-1" }, /* @__PURE__ */ React.createElement("span", null, "Descuento Fidelización (", service.descFidelizacion, "%)"), /* @__PURE__ */ React.createElement("span", null, "−", fmtMoney(service.precioLista * service.descFidelizacion / 100))), aplicarFP && /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-sm text-slate-600 mt-1" }, /* @__PURE__ */ React.createElement("span", null, "Descuento Clientes Ford Protect (", service.descFordProtect, "%)"), /* @__PURE__ */ React.createElement("span", null, "−", fmtMoney(service.precioLista * service.descFordProtect / 100))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between items-baseline border-t border-emerald-200 mt-2 pt-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-sm font-bold text-slate-700" }, "Precio final"), /* @__PURE__ */ React.createElement("span", { className: "text-2xl font-bold text-emerald-700" }, fmtMoney(precioFinal)))), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: agregarAlPresupuesto, className: "flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-2.5 rounded-lg transition" }, agregado ? "✓ Agregado" : "Agregar al presupuesto"), /* @__PURE__ */ React.createElement("button", { onClick: abrirComprobante, className: "flex-1 bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium py-2.5 rounded-lg transition" }, "Comprobante rápido")), /* @__PURE__ */ React.createElement("a", { href: `https://api.whatsapp.com/send?text=${waText}`, target: "_blank", rel: "noreferrer", className: "mt-2 block text-center bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium py-2.5 rounded-lg transition" }, "Enviar por WhatsApp"), /* @__PURE__ */ React.createElement(BotonCopiarMensaje, { texto: mensajeCopiar, className: "mt-2 w-full text-center bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50 text-sm font-medium py-2.5 rounded-lg transition" }), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-400 mt-2" }, 'Al agregar al presupuesto, cada repuesto y la mano de obra se cargan como líneas separadas — no un solo renglón "Service".'))), comprobante && service && /* @__PURE__ */ React.createElement(
+  )), !bloque && /* @__PURE__ */ React.createElement("p", { className: "text-slate-400 text-sm" }, "Elegí primero el modelo."))), /* @__PURE__ */ React.createElement("div", { className: "bg-white rounded-xl border border-slate-200 p-5" }, /* @__PURE__ */ React.createElement("h2", { className: "font-semibold text-slate-800 mb-4 flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full bg-emerald-600" }), " Detalle del service"), !service && /* @__PURE__ */ React.createElement("div", { className: "h-64 flex items-center justify-center text-slate-400 text-sm text-center px-6" }, "Elegí categoría, modelo y kilometraje."), service && /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 mb-1" }, titulo), /* @__PURE__ */ React.createElement("p", { className: "font-medium text-slate-800 mb-4" }, "Service de ", km.toLocaleString("es-AR"), " km"), /* @__PURE__ */ React.createElement("p", { className: "text-xs font-medium text-slate-500 mb-2" }, "Ítems que se cambian"), /* @__PURE__ */ React.createElement("ul", { className: "mb-4 space-y-1" }, service.items.map((i) => /* @__PURE__ */ React.createElement("li", { key: i.nombre, className: "text-sm text-slate-700 flex items-start gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-emerald-600 mt-0.5" }, "✓"), /* @__PURE__ */ React.createElement("span", null, i.nombre, i.codigo ? /* @__PURE__ */ React.createElement("span", { className: "text-slate-400 text-xs" }, " (", i.codigo, ")") : ""))), service.items.length === 0 && /* @__PURE__ */ React.createElement("li", { className: "text-sm text-slate-400" }, "Sin ítems de repuesto cargados para este tramo.")), service.horas && /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 mb-3" }, "Mano de obra estimada: ", service.horas, " hs"), /* @__PURE__ */ React.createElement("div", { className: "mb-4 space-y-2" }, /* @__PURE__ */ React.createElement("label", { className: `flex items-center gap-2 text-sm px-3 py-2 rounded-lg border ${tieneFordProtect ? "border-slate-200 cursor-pointer" : "border-slate-100 text-slate-300"}` }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", disabled: !tieneFordProtect, checked: aplicarFP, onChange: (e) => { setAplicarFP(e.target.checked); if (e.target.checked) setAplicarPP(false); }, className: "accent-emerald-600" }), "Cliente con Garantía Extendida Ford Protect", tieneFordProtect ? ` (${service.descFordProtect}%)` : " (no disponible para este tramo)"), React.createElement("label", { className: `flex items-center gap-2 text-sm px-3 py-2 rounded-lg border ${tienePrepago ? "border-slate-200 cursor-pointer" : "border-slate-100 text-slate-300"}` }, React.createElement("input", { type: "checkbox", disabled: !tienePrepago, checked: aplicarPP, onChange: (e) => { setAplicarPP(e.target.checked); if (e.target.checked) setAplicarFP(false); }, className: "accent-emerald-600" }), "Cliente con Mantenimiento Prepago Ford Protect", tienePrepago ? ` (${service.descPrepago}%)` : " (no disponible para este tramo)")), /* @__PURE__ */ React.createElement("div", { className: "bg-emerald-50 border border-emerald-100 rounded-lg p-4 mb-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-sm text-slate-600" }, /* @__PURE__ */ React.createElement("span", null, "Precio de lista"), /* @__PURE__ */ React.createElement("span", null, fmtMoney(service.precioLista))), aplicarFid && /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-sm text-slate-600 mt-1" }, /* @__PURE__ */ React.createElement("span", null, "Descuento Fidelización (", service.descFidelizacion, "%)"), /* @__PURE__ */ React.createElement("span", null, "−", fmtMoney(service.precioLista * service.descFidelizacion / 100))), aplicarFP && /* @__PURE__ */ React.createElement("div", { className: "flex justify-between text-sm text-slate-600 mt-1" }, /* @__PURE__ */ React.createElement("span", null, "Descuento Clientes Ford Protect (", service.descFordProtect, "%)"), /* @__PURE__ */ React.createElement("span", null, "−", fmtMoney(service.precioLista * service.descFordProtect / 100))), /* @__PURE__ */ React.createElement("div", { className: "flex justify-between items-baseline border-t border-emerald-200 mt-2 pt-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-sm font-bold text-slate-700" }, "Precio final"), /* @__PURE__ */ React.createElement("span", { className: "text-2xl font-bold text-emerald-700" }, fmtMoney(precioFinal)))), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: agregarAlPresupuesto, className: "flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-2.5 rounded-lg transition" }, agregado ? "✓ Agregado" : "Agregar al presupuesto"), /* @__PURE__ */ React.createElement("button", { onClick: abrirComprobante, className: "flex-1 bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium py-2.5 rounded-lg transition" }, "Comprobante rápido")), /* @__PURE__ */ React.createElement("a", { href: `https://api.whatsapp.com/send?text=${waText}`, target: "_blank", rel: "noreferrer", className: "mt-2 block text-center bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium py-2.5 rounded-lg transition" }, "Enviar por WhatsApp"), /* @__PURE__ */ React.createElement(BotonCopiarMensaje, { texto: mensajeCopiar, className: "mt-2 w-full text-center bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50 text-sm font-medium py-2.5 rounded-lg transition" }), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-400 mt-2" }, 'Al agregar al presupuesto, cada repuesto y la mano de obra se cargan como líneas separadas — no un solo renglón "Service".'))), comprobante && service && /* @__PURE__ */ React.createElement(
     ComprobanteModal,
     {
       onClose: () => setComprobante(false),
@@ -3272,9 +3280,20 @@ const SERV_SUMMARY_MAP = {
   "Precio Sugerido de Servicio - Ford Protect": "precioFordProtect",
   "Descuento FORD PROTECT GTIA EXT": "descFordProtect",
   "Precio Sugerido de Servicio - FPROTECT": "precioFordProtect",
+  "Precio Sugerido de Servicio - MANTENIMIENTO PREPAGO": "precioPrepago",
+  "Precio Sugerido de Servicio - MANTENIMIEMIENTO PREPAGO": "precioPrepago",
   "Total s/IVA": "totalSinIva"
 };
 const SERV_IGNORE_PREFIXES = ["Total", "IVA", "FINANCIACION", "Descuento", "Precio Sugerido", "Valor Hora", "Lavado", "Mano de Obra", "Pauta Tiempo", "Fidelizacion", "Fidelizado", "Ajuste Fidelizacion"];
+function claveResumenServ(nombre) {
+  if (typeof nombre !== "string") return null;
+  if (SERV_SUMMARY_MAP[nombre]) return SERV_SUMMARY_MAP[nombre];
+  const n = nombre.toUpperCase();
+  if (n.startsWith("PRECIO SUGERIDO") && n.includes("PREPAGO")) return "precioPrepago";
+  if (n.startsWith("DESCUENTO") && (n.includes("GTIA") || n.includes("GARANT"))) return "descFordProtect";
+  if (n.startsWith("PRECIO SUGERIDO") && !n.includes("FORDPASS") && (n.includes("FPROTECT") || n.includes("FORD PROTECT"))) return "precioFordProtect";
+  return null;
+}
 function normSp(s) {
   return typeof s === "string" ? s.replace(/\s+/g, " ").trim() : s;
 }
@@ -3333,11 +3352,29 @@ function parsearHojaServicios(ws) {
         const codigo = normSp(celda(ws, rr, c + 1)) || null;
         const vals = [];
         for (let i = 0; i < n; i++) vals.push(celda(ws, rr, c + 3 + i));
-        const key = SERV_SUMMARY_MAP[nombre];
+        const key = claveResumenServ(nombre);
         if (key) {
           if (key in resumen) { rr++; continue; }
           resumen[key] = vals;
-          if (key === "precioFordProtect") parar = true;
+          if (key === "precioFordProtect") {
+            let hayPrepago = false;
+            for (let k = rr + 1; k <= rr + 4; k++) {
+              if (claveResumenServ(normSp(celda(ws, k, c))) === "precioPrepago") hayPrepago = true;
+            }
+            if (!hayPrepago) parar = true;
+          }
+          if (key === "precioPrepago") {
+            for (let k = rr - 1; k >= rr - 2; k--) {
+              if (celda(ws, k, c)) continue;
+              const pcts = [];
+              for (let i = 0; i < n; i++) pcts.push(celda(ws, k, c + 3 + i));
+              if (pcts.some((v) => typeof v === "number" && v > 0 && v < 1)) {
+                resumen.descPrepago = pcts;
+                break;
+              }
+            }
+            parar = true;
+          }
         } else if (!SERV_IGNORE_PREFIXES.some((p) => nombre.startsWith(p))) {
           if (!("precioLista" in resumen)) items.push({ nombre, codigo, precios: vals });
         }
@@ -3520,6 +3557,9 @@ function construirServiciosDesdeWorkbook(workbook) {
         const pfp = numOrNull(res.precioFordProtect && res.precioFordProtect[i]);
         const dfid = numOrNull(res.descFidelizacion && res.descFidelizacion[i]);
         const dfp = numOrNull(res.descFordProtect && res.descFordProtect[i]);
+        const ppp = numOrNull(res.precioPrepago && res.precioPrepago[i]);
+        let dpp = numOrNull(res.descPrepago && res.descPrepago[i]);
+        if (dpp === null && ppp !== null && pl) dpp = 1 - ppp / pl;
         const horas = numOrNull(res.horas && res.horas[i]);
         const manoObraPesos = numOrNull(res.manoObraPesos && res.manoObraPesos[i]);
         const precioFinal = pfp !== null ? pfp : pfd !== null ? pfd : pl;
@@ -3529,6 +3569,9 @@ function construirServiciosDesdeWorkbook(workbook) {
           precioLista: pl !== null ? Math.round(pl) : null,
           descFidelizacion: dfid !== null ? Math.round(dfid * 1e3) / 10 : 0,
           descFordProtect: dfp !== null ? Math.round(dfp * 1e3) / 10 : 0,
+          precioFordProtect: pfp !== null ? Math.round(pfp) : null,
+          descPrepago: dpp !== null && dpp > 0 ? Math.round(dpp * 1e3) / 10 : 0,
+          precioPrepago: ppp !== null ? Math.round(ppp) : null,
           precio: precioFinal !== null ? Math.round(precioFinal) : null,
           horas: horas !== null ? Math.round(horas * 100) / 100 : null,
           manoObraPesos: manoObraPesos !== null ? Math.round(manoObraPesos) : null,
